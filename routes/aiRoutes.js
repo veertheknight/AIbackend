@@ -162,7 +162,7 @@ router.use(authenticateMiddleware);
 router.use(checkCreditsMiddleware);
 
 // Helper to handle simple text generation using gemini-3.1-flash-lite
-async function generateText(prompt, model = "gemini-1.5-flash") {
+async function generateText(prompt, model = "gemini-3.5-flash") {
   const response = await ai.models.generateContent({
     model,
     contents: prompt,
@@ -223,7 +223,7 @@ router.post("/homework", async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3.5-flash",
       contents,
     });
 
@@ -291,7 +291,7 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     ${text.substring(0, 20000)}`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -358,7 +358,7 @@ router.post("/image-analyzer", async (req, res) => {
     ];
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3.5-flash",
       contents,
     });
 
@@ -466,7 +466,7 @@ router.post("/whatsapp", async (req, res) => {
     ["Option 1", "Option 2", "Option 3"]`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -584,7 +584,7 @@ router.post("/code", async (req, res) => {
       Explain the improvements made and show the optimized code.`;
     }
 
-    const result = await generateText(query, "gemini-1.5-flash");
+    const result = await generateText(query, "gemini-3.5-flash");
 
     // Save history log automatically
     await saveRequestHistory(
@@ -673,7 +673,7 @@ router.post("/scam", async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3.5-flash",
       contents,
       config: {
         responseMimeType: "application/json",
@@ -760,7 +760,7 @@ router.post("/fake-news", async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-3.5-flash",
       contents,
       config: {
         responseMimeType: "application/json",
@@ -837,7 +837,7 @@ router.post("/voice", async (req, res) => {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         contents,
         config: {
           responseMimeType: "application/json",
@@ -868,7 +868,7 @@ router.post("/voice", async (req, res) => {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         contents,
       });
 

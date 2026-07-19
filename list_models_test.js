@@ -7,14 +7,17 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-async function listModels() {
+async function testGenerate() {
   try {
-    console.log("Using API key starting with:", process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.slice(0, 10) : "MISSING");
-    const response = await ai.models.list();
-    console.log("Raw response:", JSON.stringify(response));
+    console.log("Testing generation with gemini-3.5-flash...");
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: "Hello, answer in one word: what is 2+2?",
+    });
+    console.log("Success! Response text:", response.text);
   } catch (error) {
-    console.error("Failed to list models:", error.message);
+    console.error("Test generation failed:", error.message);
   }
 }
 
-listModels();
+testGenerate();
