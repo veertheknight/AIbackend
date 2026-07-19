@@ -8,8 +8,15 @@ let adminApp;
 try {
   const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (serviceAccountKey) {
+    let parsedKey;
+    try {
+      parsedKey = JSON.parse(serviceAccountKey);
+    } catch (parseErr) {
+      console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:", parseErr.message);
+      throw new Error("Invalid FIREBASE_SERVICE_ACCOUNT_KEY JSON format.");
+    }
     adminApp = admin.initializeApp({
-      credential: admin.credential.cert(JSON.parse(serviceAccountKey)),
+      credential: admin.credential.cert(parsedKey),
       storageBucket: "oneai-609b5.firebasestorage.app"
     });
     console.log("Firebase Admin SDK initialized via Service Account Key.");

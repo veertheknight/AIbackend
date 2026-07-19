@@ -40,6 +40,38 @@ async function authenticateMiddleware(req, res, next) {
   }
 }
 
+// Helper to refund credit on route failure if the user is not a guest
+async function refundCreditIfNeeded(req) {
+  try {
+    if (req.user && !req.user.isGuest) {
+      const userRef = adminDb.collection("users").doc(req.user.uid);
+      await userRef.update({
+        credits: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      console.log(`[Refund System] Successfully refunded 1 credit to user: ${req.user.uid}`);
+    }
+  } catch (err) {
+    console.error("[Refund System] Failed to refund credit:", err.message);
+  }
+}
+
+// Helper to mask internal crash messages with professional warnings
+function getFriendlyErrorMessage(error) {
+  const msg = error.message || "";
+  if (
+    msg.includes("No speech detected") ||
+    msg.includes("Please watch the complete") ||
+    msg.includes("Validation") ||
+    msg.includes("Missing") ||
+    msg.includes("No Credits") ||
+    msg.includes("Invalid")
+  ) {
+    return msg;
+  }
+  return "An error occurred on the server. Please try again in a few moments.";
+}
+
 // Helper to save requests directly to Firestore History
 async function saveRequestHistory(uid, toolName, prompt, response, imageUrl = null, pdfUrl = null) {
   try {
@@ -172,8 +204,8 @@ async function generateText(prompt, model = "gemini-3.5-flash") {
 
 // Helper to parse JSON safely, stripping off any markdown code blocks returned by AI model variations
 function parseSafeJson(text) {
-    let cleanText = (text || "").trim();
-
+  let cleanText = (text || "").trim();
+  try {
     cleanText = cleanText
         .replace(/^```json/i, "")
         .replace(/^```/i, "")
@@ -184,26 +216,30 @@ function parseSafeJson(text) {
     const firstBracket = cleanText.indexOf("[");
 
     let start;
+    if (firstBrace === -1) start = firstBracket;
+    else if (firstBracket === -1) start = firstBrace;
+    else start = Math.min(firstBrace, firstBracket);
 
-    if (firstBrace === -1)
-        start = firstBracket;
-    else if (firstBracket === -1)
-        start = firstBrace;
-    else
-        start = Math.min(firstBrace, firstBracket);
-
-    if (start > 0)
-        cleanText = cleanText.substring(start);
+    if (start > 0) cleanText = cleanText.substring(start);
 
     const lastBrace = cleanText.lastIndexOf("}");
     const lastBracket = cleanText.lastIndexOf("]");
 
     const end = Math.max(lastBrace, lastBracket);
-
-    if (end !== -1)
-        cleanText = cleanText.substring(0, end + 1);
+    if (end !== -1) cleanText = cleanText.substring(0, end + 1);
 
     return JSON.parse(cleanText);
+  } catch (err) {
+    console.error("[JSON Parser] Initial parsing failed:", err.message);
+    try {
+      // Self-healing: Strip trailing commas inside arrays and objects
+      const selfHealed = cleanText.replace(/,\s*([\]}])/g, '$1');
+      return JSON.parse(selfHealed);
+    } catch (healErr) {
+      console.error("[JSON Parser] Parsing failed completely. Raw input text:", text);
+      throw new Error("Failed to format AI response. Please try again.");
+    }
+  }
 }
 
 // 1. Homework Solver
@@ -267,7 +303,8 @@ router.post("/homework", async (req, res) => {
     res.json({ result: response.text });
   } catch (error) {
     console.error("Homework Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -338,7 +375,8 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     res.json(parseSafeJson(response.text));
   } catch (error) {
     console.error("PDF Summary Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -402,7 +440,8 @@ router.post("/image-analyzer", async (req, res) => {
     res.json({ result: response.text });
   } catch (error) {
     console.error("Image Analyzer Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -469,7 +508,8 @@ router.post("/image-generator", async (req, res) => {
     return res.json({ imageUrl: fallbackUrl });
   } catch (error) {
     console.error("Image Generator Fallback Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -511,7 +551,8 @@ router.post("/whatsapp", async (req, res) => {
     res.json({ options: parseSafeJson(response.text) });
   } catch (error) {
     console.error("WhatsApp Reply Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -546,7 +587,8 @@ router.post("/email", async (req, res) => {
     res.json({ result });
   } catch (error) {
     console.error("Email Writer Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -576,7 +618,8 @@ router.post("/translator", async (req, res) => {
     res.json({ result: result.trim() });
   } catch (error) {
     console.error("Translator Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -624,7 +667,8 @@ router.post("/code", async (req, res) => {
     res.json({ result });
   } catch (error) {
     console.error("Code Generator Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -720,7 +764,8 @@ router.post("/scam", async (req, res) => {
     res.json(parseSafeJson(response.text));
   } catch (error) {
     console.error("Scam Detector Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -807,7 +852,8 @@ router.post("/fake-news", async (req, res) => {
     res.json(parseSafeJson(response.text));
   } catch (error) {
     console.error("Fake News Detector Error:", error);
-    res.status(500).json({ error: error.message });
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
@@ -815,8 +861,10 @@ router.post("/fake-news", async (req, res) => {
 router.post("/voice", async (req, res) => {
   try {
     const { message, audioBase64, history } = req.body;
+    console.log(`[Voice Route] Incoming request from UID: ${req?.user?.uid || "unknown"}. Text message: ${message ? "Yes" : "No"}, Audio input: ${audioBase64 ? "Yes" : "No"}`);
 
     if (!message && !audioBase64) {
+      console.warn("[Voice Route] Validation Failure: Missing text message or audio input");
       return res.status(400).json({ error: "Missing text message or audio input" });
     }
 
@@ -836,6 +884,14 @@ router.post("/voice", async (req, res) => {
         cleanAudio = cleanAudio.split("base64,")[1];
       }
 
+      const audioSize = Buffer.from(cleanAudio, "base64").length;
+      console.log(`[Voice Route] Audio payload size: ${audioSize} bytes`);
+
+      if (audioSize === 0) {
+        console.warn("[Voice Route] Validation Failure: Audio payload size is zero");
+        return res.status(400).json({ error: "Audio recording is empty. Please try again." });
+      }
+
       // Upload audio to Firebase Storage
       const destinationPath = `users/${req.user.uid}/uploads/voice_${Date.now()}.m4a`;
       audioUrl = await uploadBase64ToStorage(cleanAudio, destinationPath);
@@ -843,6 +899,10 @@ router.post("/voice", async (req, res) => {
       const prompt = `Listen to the user speaking in this audio file.
       1. Transcribe the user's spoken words accurately.
       2. Formulate a short, natural, conversational spoken response (1-2 sentences).
+      
+      CRITICAL SAFETY DIRECTIVES:
+      - If the audio contains only silence, background noise, or no clear speech, transcribe it exactly as "NO_SPEECH" and set "answer" to "NO_SPEECH".
+      - Never hallucinate or guess spoken words if the audio is unclear.
       
       Return ONLY a JSON object matching this schema (do not wrap in markdown, just raw JSON):
       {
@@ -863,6 +923,7 @@ router.post("/voice", async (req, res) => {
         ],
       });
 
+      console.log("[Voice Route] Sending transcription/response request to Gemini...");
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents,
@@ -871,7 +932,21 @@ router.post("/voice", async (req, res) => {
         },
       });
 
+      console.log("[Voice Route] Gemini raw response text:", response.text);
       const parsed = parseSafeJson(response.text);
+
+      // Validate transcription output
+      if (
+        !parsed.transcription || 
+        parsed.transcription === "NO_SPEECH" || 
+        parsed.answer === "NO_SPEECH" ||
+        parsed.transcription.trim().length === 0
+      ) {
+        console.warn("[Voice Route] No speech detected in audio file");
+        throw new Error("No speech detected. Please try again.");
+      }
+
+      console.log(`[Voice Route] Transcribed text: "${parsed.transcription}"`);
 
       // Save history log automatically
       await saveRequestHistory(
@@ -894,10 +969,13 @@ router.post("/voice", async (req, res) => {
         parts: [{ text: `Answer this in a short, natural, conversational spoken tone (1-2 sentences): ${message}` }]
       });
 
+      console.log("[Voice Route] Sending text message request to Gemini...");
       const response = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents,
       });
+
+      console.log("[Voice Route] Gemini text response:", response.text);
 
       // Save history log automatically
       await saveRequestHistory(
@@ -915,8 +993,9 @@ router.post("/voice", async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("Voice Chat Error:", error);
-    res.status(500).json({ error: error.message });
+    console.error("[Voice Route] Exception occurred:", error);
+    await refundCreditIfNeeded(req);
+    res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
 });
 
