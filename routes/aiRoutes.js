@@ -51,7 +51,7 @@ async function saveRequestHistory(uid, toolName, prompt, response, imageUrl = nu
       response,
       imageUrl,
       pdfUrl,
-      timestamp: admin.firestore.FieldValue.serverTimestamp()
+      timestamp: FieldValue.serverTimestamp()
     });
     console.log(`Saved history log for tool: ${toolName}, user: ${uid}`);
   } catch (e) {
@@ -118,8 +118,8 @@ async function checkCreditsMiddleware(req, res, next) {
         uid: uid,
         credits: 20,
         premium: false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
       };
       await userRef.set(newUserData);
       console.log(`First-time setup completed for UID: ${uid} (Granted 20 credits).`);
@@ -127,7 +127,7 @@ async function checkCreditsMiddleware(req, res, next) {
       // Deduct 1 credit for the current request
       await userRef.update({
         credits: 19,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       });
       return next();
     }
