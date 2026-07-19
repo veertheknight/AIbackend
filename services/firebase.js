@@ -1,4 +1,5 @@
 import admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -29,4 +30,5 @@ try {
 export const adminDb = admin.firestore(adminApp);
 export const adminAuth = admin.auth(adminApp);
 export const adminStorage = admin.storage(adminApp);
+export { FieldValue };
 export default adminApp;

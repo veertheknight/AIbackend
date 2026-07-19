@@ -3,7 +3,7 @@ import multer from "multer";
 import fs from "fs";
 import { createRequire } from "module";
 import { ai } from "../services/gemini.js";
-import admin, { adminDb, adminAuth, adminStorage } from "../services/firebase.js";
+import admin, { adminDb, FieldValue, adminAuth, adminStorage } from "../services/firebase.js";
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse");
@@ -147,8 +147,8 @@ async function checkCreditsMiddleware(req, res, next) {
 
     // Deduct 1 credit atomically
     await userRef.update({
-      credits: admin.firestore.FieldValue.increment(-1),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      credits: FieldValue.increment(-1),
+      updatedAt: FieldValue.serverTimestamp()
     });
 
     next();
