@@ -60,13 +60,13 @@ async function saveRequestHistory(uid, toolName, prompt, response, imageUrl = nu
 }
 
 // Helper to upload base64 image data directly to Firebase Storage
-async function uploadBase64ToStorage(base64Data, destinationPath) {
+async function uploadBase64ToStorage(base64Data, destinationPath, mimeType = "image/jpeg") {
   try {
     const bucket = adminStorage.bucket();
     const file = bucket.file(destinationPath);
     const buffer = Buffer.from(base64Data, "base64");
     await file.save(buffer, {
-      metadata: { contentType: "image/jpeg" },
+      metadata: { contentType: mimeType },
       public: true,
     });
     return `https://storage.googleapis.com/${bucket.name}/${destinationPath}`;
@@ -172,11 +172,38 @@ async function generateText(prompt, model = "gemini-3.5-flash") {
 
 // Helper to parse JSON safely, stripping off any markdown code blocks returned by AI model variations
 function parseSafeJson(text) {
-  let cleanText = (text || "").trim();
-  if (cleanText.startsWith("```")) {
-    cleanText = cleanText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-  }
-  return JSON.parse(cleanText);
+    let cleanText = (text || "").trim();
+
+    cleanText = cleanText
+        .replace(/^```json/i, "")
+        .replace(/^```/i, "")
+        .replace(/```$/i, "")
+        .trim();
+
+    const firstBrace = cleanText.indexOf("{");
+    const firstBracket = cleanText.indexOf("[");
+
+    let start;
+
+    if (firstBrace === -1)
+        start = firstBracket;
+    else if (firstBracket === -1)
+        start = firstBrace;
+    else
+        start = Math.min(firstBrace, firstBracket);
+
+    if (start > 0)
+        cleanText = cleanText.substring(start);
+
+    const lastBrace = cleanText.lastIndexOf("}");
+    const lastBracket = cleanText.lastIndexOf("]");
+
+    const end = Math.max(lastBrace, lastBracket);
+
+    if (end !== -1)
+        cleanText = cleanText.substring(0, end + 1);
+
+    return JSON.parse(cleanText);
 }
 
 // 1. Homework Solver
@@ -481,7 +508,7 @@ router.post("/whatsapp", async (req, res) => {
       response.text
     );
 
-    res.json({ options: JSON.parse(response.text) });
+    res.json({ options: parseSafeJson(response.text) });
   } catch (error) {
     console.error("WhatsApp Reply Error:", error);
     res.status(500).json({ error: error.message });
