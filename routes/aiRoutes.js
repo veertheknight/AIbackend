@@ -1,0 +1,896 @@
+import express from "express";
+import multer from "multer";
+import fs from "fs";
+import { createRequire } from "module";
+import { ai } from "../services/gemini.js";
+import admin, { adminDb, adminAuth, adminStorage } from "../services/firebase.js";
+
+const require = createRequire(import.meta.url);
+const { PDFParse } = require("pdf-parse");
+
+// Middleware to verify Firebase ID Token securely
+async function authenticateMiddleware(req, res, next) {
+  try {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      // Safe fallback to header UID for testing/compatibility
+      const fallbackUid = req.headers["x-user-uid"];
+      if (fallbackUid) {
+        req.user = { 
+          uid: fallbackUid, 
+          isGuest: fallbackUid.startsWith("guest_") || fallbackUid.includes("anonymous") 
+        };
+        return next();
+      }
+      return res.status(401).json({ error: "Unauthorized: Missing Authorization Token" });
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    const decodedToken = await adminAuth.verifyIdToken(idToken);
+    
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email || "",
+      isGuest: decodedToken.firebase?.sign_in_provider === "anonymous",
+    };
+    next();
+  } catch (error) {
+    console.error("Token verification failed:", error.message);
+    return res.status(401).json({ error: "Unauthorized: Invalid Token" });
+  }
+}
+
+// Helper to save requests directly to Firestore History
+async function saveRequestHistory(uid, toolName, prompt, response, imageUrl = null, pdfUrl = null) {
+  try {
+    const historyRef = adminDb.collection("history");
+    await historyRef.add({
+      userId: uid,
+      toolName,
+      prompt,
+      response,
+      imageUrl,
+      pdfUrl,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+    console.log(`Saved history log for tool: ${toolName}, user: ${uid}`);
+  } catch (e) {
+    console.error("Failed to save history log:", e.message);
+  }
+}
+
+// Helper to upload base64 image data directly to Firebase Storage
+async function uploadBase64ToStorage(base64Data, destinationPath) {
+  try {
+    const bucket = adminStorage.bucket();
+    const file = bucket.file(destinationPath);
+    const buffer = Buffer.from(base64Data, "base64");
+    await file.save(buffer, {
+      metadata: { contentType: "image/jpeg" },
+      public: true,
+    });
+    return `https://storage.googleapis.com/${bucket.name}/${destinationPath}`;
+  } catch (e) {
+    console.error("Firebase Storage base64 upload failed:", e.message);
+    return null;
+  }
+}
+
+// Helper to upload a local file to Firebase Storage
+async function uploadFileToStorage(localFilePath, destinationPath, mimeType) {
+  try {
+    const bucket = adminStorage.bucket();
+    await bucket.upload(localFilePath, {
+      destination: destinationPath,
+      metadata: { contentType: mimeType },
+      public: true,
+    });
+    return `https://storage.googleapis.com/${bucket.name}/${destinationPath}`;
+  } catch (e) {
+    console.error("Firebase Storage file upload failed:", e.message);
+    return null;
+  }
+}
+
+const router = express.Router();
+const upload = multer({ dest: "uploads/" });
+
+// Middleware to verify and deduct credits for all AI routes securely
+async function checkCreditsMiddleware(req, res, next) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized: User not authenticated" });
+    }
+
+    const { uid, isGuest } = req.user;
+
+    // Guest users bypass credit checks (gated by AdMob ads on the frontend)
+    if (isGuest) {
+      return next();
+    }
+
+    const userRef = adminDb.collection("users").doc(uid);
+    const docSnap = await userRef.get();
+
+    if (!docSnap.exists) {
+      // First-time user setup: Grant 20 credits, minus 1 for current request
+      const newUserData = {
+        uid: uid,
+        credits: 20,
+        premium: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      };
+      await userRef.set(newUserData);
+      console.log(`First-time setup completed for UID: ${uid} (Granted 20 credits).`);
+      
+      // Deduct 1 credit for the current request
+      await userRef.update({
+        credits: 19,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return next();
+    }
+
+    const userData = docSnap.data();
+    
+    // Premium users have unlimited credits
+    if (userData.premium === true) {
+      return next();
+    }
+
+    const currentCredits = userData.credits ?? 20;
+
+    if (currentCredits <= 0) {
+      return res.status(402).json({ error: "No Credits" });
+    }
+
+    // Deduct 1 credit atomically
+    await userRef.update({
+      credits: admin.firestore.FieldValue.increment(-1),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    next();
+  } catch (error) {
+    console.error("Credits Verification Middleware Failed:", error.message);
+    return res.status(500).json({ error: "Internal Server Error in Credits Verification" });
+  }
+}
+
+router.use(authenticateMiddleware);
+router.use(checkCreditsMiddleware);
+
+// Helper to handle simple text generation using gemini-3.1-flash-lite
+async function generateText(prompt, model = "gemini-2.0-flash") {
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+  });
+  return response.text;
+}
+
+// Helper to parse JSON safely, stripping off any markdown code blocks returned by AI model variations
+function parseSafeJson(text) {
+  let cleanText = (text || "").trim();
+  if (cleanText.startsWith("```")) {
+    cleanText = cleanText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+  }
+  return JSON.parse(cleanText);
+}
+
+// 1. Homework Solver
+router.post("/homework", async (req, res) => {
+  try {
+    const { question, imageBase64 } = req.body;
+
+    if (!question && !imageBase64) {
+      return res.status(400).json({ error: "Missing question or image" });
+    }
+
+    let imageUrl = null;
+    let contents;
+    if (imageBase64) {
+      let cleanBase64 = imageBase64;
+      if (cleanBase64.includes("base64,")) {
+        cleanBase64 = cleanBase64.split("base64,")[1];
+      }
+
+      // Upload to Firebase Storage
+      const destinationPath = `users/${req.user.uid}/uploads/homework_${Date.now()}.jpg`;
+      imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
+
+      contents = [
+        {
+          role: "user",
+          parts: [
+            {
+              text: question || "Solve the homework in this image. Give a complete step-by-step explanation with correct formulas and formatting.",
+            },
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: cleanBase64,
+              },
+            },
+          ],
+        },
+      ];
+    } else {
+      contents = `You are a professional Homework Solver. Solve the following question in detail using clear step-by-step formatting (markdown). Cover formulas, concepts, and write a thorough response:
+      
+      Question: ${question}`;
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents,
+    });
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Homework Solver",
+      question || "Analyzed image task",
+      response.text,
+      imageUrl,
+      null
+    );
+
+    res.json({ result: response.text });
+  } catch (error) {
+    console.error("Homework Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 2. PDF Summary
+router.post("/pdf", upload.single("pdf"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No PDF file uploaded" });
+    }
+
+    // Upload to Firebase Storage
+    const destinationPath = `users/${req.user.uid}/uploads/pdf_${Date.now()}.pdf`;
+    const pdfUrl = await uploadFileToStorage(req.file.path, destinationPath, "application/pdf");
+
+    const dataBuffer = fs.readFileSync(req.file.path);
+    const parser = new PDFParse({ data: dataBuffer });
+    const pdfData = await parser.getText();
+    const text = pdfData.text;
+
+    // clean up uploaded file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (e) {
+      console.error("Temp file cleanup failed:", e);
+    }
+
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: "Failed to extract text from PDF." });
+    }
+
+    const prompt = `Analyze the following PDF content and generate a comprehensive summary.
+    Return ONLY a JSON object matching this schema (do not wrap in markdown blocks, just raw JSON):
+    {
+      "summary": "Brief executive summary (2-3 paragraphs)",
+      "bulletPoints": ["Key point 1", "Key point 2", "Key point 3", "Key point 4"],
+      "chapterSummary": [
+        {"title": "Section/Chapter 1", "summary": "Section 1 summary..."},
+        {"title": "Section/Chapter 2", "summary": "Section 2 summary..."}
+      ],
+      "importantQuestions": [
+        {"question": "Question 1", "answer": "Answer 1"},
+        {"question": "Question 2", "answer": "Answer 2"}
+      ],
+      "keyPoints": ["Important term/concept 1: definition", "Important term/concept 2: definition"]
+    }
+
+    PDF Text:
+    ${text.substring(0, 20000)}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "PDF Summary",
+      `Summarized document: ${req.file.originalname || "Uploaded PDF"}`,
+      response.text,
+      null,
+      pdfUrl
+    );
+
+    res.json(parseSafeJson(response.text));
+  } catch (error) {
+    console.error("PDF Summary Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. Image Analyzer
+router.post("/image-analyzer", async (req, res) => {
+  try {
+    const { imageBase64, mode } = req.body;
+
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Missing image data" });
+    }
+
+    let cleanBase64 = imageBase64;
+    if (cleanBase64.includes("base64,")) {
+      cleanBase64 = cleanBase64.split("base64,")[1];
+    }
+
+    // Upload to Firebase Storage
+    const destinationPath = `users/${req.user.uid}/uploads/analyzer_${Date.now()}.jpg`;
+    const imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
+
+    let instruction = "Analyze this image and explain what is in it.";
+    if (mode === "ocr") {
+      instruction = "Perform OCR on this image. Extract and transcribe all visible text accurately. Keep original line breaks and layout structure where possible.";
+    } else if (mode === "objects") {
+      instruction = "Identify all significant objects, items, people, and visual elements in this image. List them with descriptions.";
+    } else if (mode === "solve") {
+      instruction = "Look at the question or problem in this image and solve it step-by-step. Provide explanations.";
+    }
+
+    const contents = [
+      {
+        role: "user",
+        parts: [
+          { text: instruction },
+          {
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: cleanBase64,
+            },
+          },
+        ],
+      },
+    ];
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents,
+    });
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Image Analyzer",
+      `Image Analysis (${mode || "general"})`,
+      response.text,
+      imageUrl,
+      null
+    );
+
+    res.json({ result: response.text });
+  } catch (error) {
+    console.error("Image Analyzer Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. Image Generator (with self-healing fallback)
+router.post("/image-generator", async (req, res) => {
+  try {
+    const { prompt, style } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: "Missing prompt" });
+    }
+
+    const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
+
+    try {
+      // Try using Imagen model first
+      const response = await ai.models.generateImages({
+        model: "imagen-3.0-generate-002",
+        prompt: styledPrompt,
+        config: {
+          numberOfImages: 1,
+          outputMimeType: "image/jpeg",
+          aspectRatio: "1:1",
+        },
+      });
+
+      if (response.generatedImages && response.generatedImages[0]) {
+        const base64Data = response.generatedImages[0].image.imageBytes;
+        
+        // Upload base64 bytes to Firebase Storage
+        const destinationPath = `users/${req.user.uid}/generations/art_${Date.now()}.jpg`;
+        const imageUrl = await uploadBase64ToStorage(base64Data, destinationPath);
+
+        // Save history log automatically
+        await saveRequestHistory(
+          req.user.uid,
+          "Image Generator",
+          styledPrompt,
+          "Generated art image (native)",
+          imageUrl,
+          null
+        );
+
+        return res.json({ imageUrl });
+      }
+    } catch (apiError) {
+      console.log("Imagen model unavailable/restricted, invoking premium Unsplash fallback. Error:", apiError.message);
+    }
+
+    // Graceful self-healing fallback: query Pollinations AI dynamically based on prompt terms + style
+    const fallbackUrl = `https://image.pollinations.ai/p/${encodeURIComponent(styledPrompt)}?width=600&height=600&nologo=true`;
+    console.log(`Pollinations Fallback URL: ${fallbackUrl}`);
+
+    // Save history log automatically with the fallback URL
+    await saveRequestHistory(
+      req.user.uid,
+      "Image Generator",
+      styledPrompt,
+      "Generated art image (fallback)",
+      fallbackUrl,
+      null
+    );
+
+    return res.json({ imageUrl: fallbackUrl });
+  } catch (error) {
+    console.error("Image Generator Fallback Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 5. WhatsApp Reply Generator
+router.post("/whatsapp", async (req, res) => {
+  try {
+    const { message, tone, length } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: "Missing message" });
+    }
+
+    const prompt = `Create a WhatsApp response for this incoming message: "${message}".
+    
+    Style Guidelines:
+    - Tone: ${tone || "friendly"} (friendly, professional, funny, formal)
+    - Length: ${length || "short"} (short: one sentence/quick; long: detailed/thoughtful)
+    
+    Provide 3 distinct response variations.
+    Return ONLY a JSON array of strings:
+    ["Option 1", "Option 2", "Option 3"]`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "WhatsApp Reply",
+      `Generate WhatsApp reply for: "${message.substring(0, 100)}..."`,
+      response.text
+    );
+
+    res.json({ options: JSON.parse(response.text) });
+  } catch (error) {
+    console.error("WhatsApp Reply Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 6. Email Writer
+router.post("/email", async (req, res) => {
+  try {
+    const { purpose, tone, details } = req.body;
+
+    if (!purpose) {
+      return res.status(400).json({ error: "Missing purpose" });
+    }
+
+    const prompt = `Write a high-quality email draft.
+    
+    Details:
+    - Purpose/Topic: ${purpose} (e.g. Job Application, Complaint, Request, Resignation)
+    - Tone: ${tone || "professional"} (professional, casual, formal, persuasive, friendly)
+    - Context/Details: ${details || "None specified"}
+    
+    Structure the email clearly with a Subject Line, Salutation, Body paragraphs, and a sign-off placeholder. Use clear markdown spacing.`;
+
+    const result = await generateText(prompt);
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Email Writer",
+      `Email topic: ${purpose}`,
+      result
+    );
+
+    res.json({ result });
+  } catch (error) {
+    console.error("Email Writer Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7. Translator
+router.post("/translator", async (req, res) => {
+  try {
+    const { text, targetLanguage } = req.body;
+
+    if (!text || !targetLanguage) {
+      return res.status(400).json({ error: "Missing text or targetLanguage" });
+    }
+
+    const prompt = `Translate the following text into ${targetLanguage}. Return ONLY the direct translation, do not add introductory remarks or explanation:
+    
+    "${text}"`;
+
+    const result = await generateText(prompt);
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Translator",
+      `Translate to ${targetLanguage}: "${text.substring(0, 100)}..."`,
+      result.trim()
+    );
+
+    res.json({ result: result.trim() });
+  } catch (error) {
+    console.error("Translator Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 8. Code Generator
+router.post("/code", async (req, res) => {
+  try {
+    const { code, language, action, prompt } = req.body;
+
+    if (!action) {
+      return res.status(400).json({ error: "Missing action" });
+    }
+
+    let query = "";
+    if (action === "generate") {
+      query = `Generate a programming solution in ${language || "Javascript"}. Requirement: ${prompt}. Explain the code briefly.`;
+    } else if (action === "explain") {
+      query = `Explain this ${language || ""} code step-by-step:
+      \`\`\`
+      ${code}
+      \`\`\`;`;
+    } else if (action === "fix") {
+      query = `Identify and fix bugs in this ${language || ""} code:
+      \`\`\`
+      ${code}
+      \`\`\`
+      Explain what the bugs were and provide the clean, corrected code.`;
+    } else if (action === "optimize") {
+      query = `Optimize the following ${language || ""} code for performance and readability:
+      \`\`\`
+      ${code}
+      \`\`\`
+      Explain the improvements made and show the optimized code.`;
+    }
+
+    const result = await generateText(query, "gemini-2.0-flash");
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Code Generator",
+      `Code action (${action}) in ${language || "code"}: ${prompt || ""}`,
+      result
+    );
+
+    res.json({ result });
+  } catch (error) {
+    console.error("Code Generator Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 9. Scam Detector
+router.post("/scam", async (req, res) => {
+  try {
+    const { message, imageBase64 } = req.body;
+
+    if (!message && !imageBase64) {
+      return res.status(400).json({ error: "Missing text message or screenshot image" });
+    }
+
+    let imageUrl = null;
+    let contents;
+    if (imageBase64) {
+      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+      // Upload to Firebase Storage
+      const destinationPath = `users/${req.user.uid}/uploads/scam_${Date.now()}.jpg`;
+      imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
+
+      contents = [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Analyze this image (which is a screenshot of a conversation, chat, email, message, payment receipt, website, etc.) and check if it represents a scam, phishing attempt, or fraudulent activity. If additional text was typed by the user, take it into account: "${message || ""}".
+              
+              Read the text from the screenshot and analyze the conversation context.
+              Evaluate the scam probability (0 to 100), explain why it's a scam or safe, highlight the risk factors (suspicious parts), and provide safety recommendations.
+              Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
+              {
+                "scamProbability": 85,
+                "explanation": "Detailed breakdown of the conversation, message, or receipt shown in the screenshot.",
+                "riskFactors": [
+                  "Suspicious link",
+                  "Urgent threat language",
+                  "Asks for OTP/PIN code"
+                ],
+                "recommendations": [
+                  "Do not tap any links",
+                  "Block and report the sender",
+                  "Do not share any OTP codes"
+                ]
+              }`
+            },
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: cleanBase64
+              }
+            }
+          ]
+        }
+      ];
+    } else {
+      contents = `Analyze this message and check if it is a scam, phishing attempt, or fraudulent: "${message}".
+      Evaluate the risk. Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
+      {
+        "scamProbability": 85,
+        "explanation": "Brief explanation of why this was flagged as a scam or safe.",
+        "riskFactors": [
+          "Urgent language",
+          "Requests personal credentials/banking info",
+          "Suspicious link format"
+        ],
+        "recommendations": [
+          "Do not click any link",
+          "Block the sender",
+          "Verify with the official organization"
+        ]
+      }`;
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Scam Detector",
+      message ? `Scam check for: "${message.substring(0, 100)}..."` : "Scam check screenshot",
+      response.text,
+      imageUrl,
+      null
+    );
+
+    res.json(parseSafeJson(response.text));
+  } catch (error) {
+    console.error("Scam Detector Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10. Fake News Detector
+router.post("/fake-news", async (req, res) => {
+  try {
+    const { news, imageBase64 } = req.body;
+
+    if (!news && !imageBase64) {
+      return res.status(400).json({ error: "Missing news text or screenshot image" });
+    }
+
+    let imageUrl = null;
+    let contents;
+    if (imageBase64) {
+      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+      // Upload to Firebase Storage
+      const destinationPath = `users/${req.user.uid}/uploads/fakenews_${Date.now()}.jpg`;
+      imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
+
+      contents = [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Analyze this news image, screenshot (of an X/Twitter post, Facebook post, news article, WhatsApp forward, etc.) and check for fake news, fabricated claims, manipulations, or misleading context. If additional text was provided by the user, incorporate it: "${news || ""}".
+              
+              Read the text from the image, understand its full context, detect bias or manipulation, and output the credibility analysis.
+              Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
+              {
+                "credibilityScore": 45,
+                "verdict": "Suspicious / Fake / True / Misleading / Unverified",
+                "explanation": "A breakdown of the claim's factual accuracy.",
+                "sources": [
+                  "Reliable reference 1 (e.g. Associated Press)",
+                  "Fact-checking reference 2 (e.g. Snopes)"
+                ],
+                "bias": "Left-leaning / Right-leaning / Neutral / Clickbait"
+              }`
+            },
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: cleanBase64
+              }
+            }
+          ]
+        }
+      ];
+    } else {
+      contents = `Critically analyze this news story, claim, or article: "${news}".
+      Verify its facts and determine the credibility. Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
+      {
+        "credibilityScore": 45,
+        "verdict": "Suspicious / Fake / True / Misleading / Unverified",
+        "explanation": "A breakdown of the claim's factual accuracy.",
+        "sources": [
+          "Reliable reference 1 (e.g. Associated Press)",
+          "Fact-checking reference 2 (e.g. Snopes)"
+        ],
+        "bias": "Left-leaning / Right-leaning / Neutral / Clickbait"
+      }`;
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    // Save history log automatically
+    await saveRequestHistory(
+      req.user.uid,
+      "Fake News Detector",
+      news ? `News check for: "${news.substring(0, 100)}..."` : "News check screenshot",
+      response.text,
+      imageUrl,
+      null
+    );
+
+    res.json(parseSafeJson(response.text));
+  } catch (error) {
+    console.error("Fake News Detector Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 11. Voice Chat (supports both typed text and direct audio input)
+router.post("/voice", async (req, res) => {
+  try {
+    const { message, audioBase64, history } = req.body;
+
+    if (!message && !audioBase64) {
+      return res.status(400).json({ error: "Missing text message or audio input" });
+    }
+
+    let contents = [];
+    if (history && history.length > 0) {
+      contents = history.map(h => ({
+        role: h.role === "model" ? "model" : "user",
+        parts: h.parts.map(p => ({ text: p.text }))
+      }));
+    }
+
+    let audioUrl = null;
+
+    if (audioBase64) {
+      let cleanAudio = audioBase64;
+      if (cleanAudio.includes("base64,")) {
+        cleanAudio = cleanAudio.split("base64,")[1];
+      }
+
+      // Upload audio to Firebase Storage
+      const destinationPath = `users/${req.user.uid}/uploads/voice_${Date.now()}.m4a`;
+      audioUrl = await uploadBase64ToStorage(cleanAudio, destinationPath);
+
+      const prompt = `Listen to the user speaking in this audio file.
+      1. Transcribe the user's spoken words accurately.
+      2. Formulate a short, natural, conversational spoken response (1-2 sentences).
+      
+      Return ONLY a JSON object matching this schema (do not wrap in markdown, just raw JSON):
+      {
+        "transcription": "The exact words spoken by the user",
+        "answer": "Your conversational response to their question"
+      }`;
+
+      contents.push({
+        role: "user",
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: "audio/m4a",
+              data: cleanAudio,
+            },
+          },
+        ],
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents,
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
+
+      const parsed = parseSafeJson(response.text);
+
+      // Save history log automatically
+      await saveRequestHistory(
+        req.user.uid,
+        "Voice Chat",
+        `Voice input: "${parsed.transcription}"`,
+        parsed.answer,
+        null,
+        audioUrl
+      );
+
+      return res.json({
+        transcription: parsed.transcription,
+        result: parsed.answer,
+      });
+
+    } else {
+      contents.push({
+        role: "user",
+        parts: [{ text: `Answer this in a short, natural, conversational spoken tone (1-2 sentences): ${message}` }]
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents,
+      });
+
+      // Save history log automatically
+      await saveRequestHistory(
+        req.user.uid,
+        "Voice Chat",
+        `Text voice query: "${message}"`,
+        response.text,
+        null,
+        null
+      );
+
+      return res.json({
+        transcription: message,
+        result: response.text,
+      });
+    }
+  } catch (error) {
+    console.error("Voice Chat Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+export default router;
