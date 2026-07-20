@@ -5,9 +5,10 @@ import { createRequire } from "module";
 import { ai } from "../services/gemini.js";
 import admin, { adminDb, FieldValue, adminAuth, adminStorage } from "../services/firebase.js";
 import { aiCache } from "../services/aiCache.js";
+import aiProvider from "../services/aiProvider.js";
 
 const require = createRequire(import.meta.url);
-const { PDFParse } = require("pdf-parse");
+const PDFParse = require("pdf-parse");
 
 // Middleware to verify Firebase ID Token securely
 async function authenticateMiddleware(req, res, next) {
@@ -70,7 +71,7 @@ function getFriendlyErrorMessage(error) {
   ) {
     return msg;
   }
-  return "An error occurred on the server. Please try again in a few moments.";
+  return "All AI services are temporarily unavailable. Please try again shortly.";
 }
 
 // Helper to save requests directly to Firestore History
@@ -194,13 +195,12 @@ async function checkCreditsMiddleware(req, res, next) {
 router.use(authenticateMiddleware);
 router.use(checkCreditsMiddleware);
 
-// Helper to handle simple text generation using gemini-3.1-flash-lite
-async function generateText(prompt, model = "gemini-3.5-flash") {
-  const response = await ai.models.generateContent({
-    model,
-    contents: prompt,
+// Helper to handle simple text generation using centralized AI manager
+async function generateText(prompt, toolName = "AI Tool") {
+  return await aiProvider.generate({
+    prompt,
+    toolName
   });
-  return response.text;
 }
 
 // Helper to parse JSON safely, stripping off any markdown code blocks returned by AI model variations
@@ -261,7 +261,8 @@ router.post("/homework", async (req, res) => {
     }
 
     let imageUrl = null;
-    let contents;
+    let responseText;
+
     if (imageBase64) {
       let cleanBase64 = imageBase64;
       if (cleanBase64.includes("base64,")) {
@@ -272,44 +273,33 @@ router.post("/homework", async (req, res) => {
       const destinationPath = `users/${req.user.uid}/uploads/homework_${Date.now()}.jpg`;
       imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
 
-      contents = [
-        {
-          role: "user",
-          parts: [
-            {
-              text: question || "Solve the homework in this image. Give a complete step-by-step explanation with correct formulas and formatting.",
-            },
-            {
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: cleanBase64,
-              },
-            },
-          ],
-        },
-      ];
+      responseText = await aiProvider.generate({
+        prompt: question || "Solve the homework in this image. Give a complete step-by-step explanation with correct formulas and formatting.",
+        images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
+        toolName: "Homework Solver"
+      });
     } else {
-      contents = `You are a professional Homework Solver. Solve the following question in detail using clear step-by-step formatting (markdown). Cover formulas, concepts, and write a thorough response:
+      const prompt = `You are a professional Homework Solver. Solve the following question in detail using clear step-by-step formatting (markdown). Cover formulas, concepts, and write a thorough response:
       
       Question: ${question}`;
-    }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents,
-    });
+      responseText = await aiProvider.generate({
+        prompt,
+        toolName: "Homework Solver"
+      });
+    }
 
     // Save history log automatically
     await saveRequestHistory(
       req.user.uid,
       "Homework Solver",
       question || "Analyzed image task",
-      response.text,
+      responseText,
       imageUrl,
       null
     );
 
-    const finalResult = { result: response.text };
+    const finalResult = { result: responseText };
     await aiCache.set("Homework Solver", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -328,8 +318,8 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     }
 
     const dataBuffer = fs.readFileSync(req.file.path);
-    const parser = new PDFParse({ data: dataBuffer });
-    const pdfData = await parser.getText();
+    const parser = new PDFParse(dataBuffer);
+    const pdfData = await parser;
     const text = pdfData.text;
 
     if (!text || text.trim().length === 0) {
@@ -382,12 +372,11 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     PDF Text:
     ${text.substring(0, 20000)}`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
+    const responseText = await aiProvider.generate({
+      prompt,
+      responseMimeType: "application/json",
+      schemaType: "pdf",
+      toolName: "PDF Summary"
     });
 
     // Save history log automatically
@@ -395,12 +384,12 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
       req.user.uid,
       "PDF Summary",
       `Summarized document: ${req.file.originalname || "Uploaded PDF"}`,
-      response.text,
+      responseText,
       null,
       pdfUrl
     );
 
-    const finalResult = parseSafeJson(response.text);
+    const finalResult = parseSafeJson(responseText);
     await aiCache.set("PDF Summary", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -452,24 +441,10 @@ router.post("/image-analyzer", async (req, res) => {
       instruction = "Look at the question or problem in this image and solve it step-by-step. Provide explanations.";
     }
 
-    const contents = [
-      {
-        role: "user",
-        parts: [
-          { text: instruction },
-          {
-            inlineData: {
-              mimeType: "image/jpeg",
-              data: cleanBase64,
-            },
-          },
-        ],
-      },
-    ];
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents,
+    const responseText = await aiProvider.generate({
+      prompt: instruction,
+      images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
+      toolName: "Image Analyzer"
     });
 
     // Save history log automatically
@@ -477,12 +452,12 @@ router.post("/image-analyzer", async (req, res) => {
       req.user.uid,
       "Image Analyzer",
       `Image Analysis (${mode || "general"})`,
-      response.text,
+      responseText,
       imageUrl,
       null
     );
 
-    const finalResult = { result: response.text };
+    const finalResult = { result: responseText };
     await aiCache.set("Image Analyzer", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -493,7 +468,7 @@ router.post("/image-analyzer", async (req, res) => {
   }
 });
 
-// 4. Image Generator (with self-healing fallback)
+// 4. Image Generator
 router.post("/image-generator", async (req, res) => {
   try {
     const { prompt, style } = req.body;
@@ -512,64 +487,35 @@ router.post("/image-generator", async (req, res) => {
 
     const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
 
-    try {
-      // Try using Imagen model first
-      const response = await ai.models.generateImages({
-        model: "imagen-3.0-generate-002",
-        prompt: styledPrompt,
-        config: {
-          numberOfImages: 1,
-          outputMimeType: "image/jpeg",
-          aspectRatio: "1:1",
-        },
-      });
+    const imageResult = await aiProvider.generateImage({ prompt, style });
 
-      if (response.generatedImages && response.generatedImages[0]) {
-        const base64Data = response.generatedImages[0].image.imageBytes;
-        
-        // Upload base64 bytes to Firebase Storage
-        const destinationPath = `users/${req.user.uid}/generations/art_${Date.now()}.jpg`;
-        const imageUrl = await uploadBase64ToStorage(base64Data, destinationPath);
+    let imageUrl = null;
+    let statusText = "Generated art image (native)";
 
-        // Save history log automatically
-        await saveRequestHistory(
-          req.user.uid,
-          "Image Generator",
-          styledPrompt,
-          "Generated art image (native)",
-          imageUrl,
-          null
-        );
-
-        const finalResult = { imageUrl };
-        await aiCache.set("Image Generator", cacheInputs, finalResult);
-
-        return res.json(finalResult);
-      }
-    } catch (apiError) {
-      console.log("Imagen model unavailable/restricted, invoking premium Unsplash fallback. Error:", apiError.message);
+    if (imageResult.base64Bytes) {
+      const destinationPath = `users/${req.user.uid}/generations/art_${Date.now()}.jpg`;
+      imageUrl = await uploadBase64ToStorage(imageResult.base64Bytes, destinationPath);
+    } else {
+      imageUrl = imageResult.fallbackUrl;
+      statusText = "Generated art image (fallback)";
     }
 
-    // Graceful self-healing fallback: query Pollinations AI dynamically based on prompt terms + style
-    const fallbackUrl = `https://image.pollinations.ai/p/${encodeURIComponent(styledPrompt)}?width=600&height=600&nologo=true`;
-    console.log(`Pollinations Fallback URL: ${fallbackUrl}`);
-
-    // Save history log automatically with the fallback URL
+    // Save history log automatically
     await saveRequestHistory(
       req.user.uid,
       "Image Generator",
       styledPrompt,
-      "Generated art image (fallback)",
-      fallbackUrl,
+      statusText,
+      imageUrl,
       null
     );
 
-    const finalResult = { imageUrl: fallbackUrl };
+    const finalResult = { imageUrl };
     await aiCache.set("Image Generator", cacheInputs, finalResult);
 
     return res.json(finalResult);
   } catch (error) {
-    console.error("Image Generator Fallback Error:", error);
+    console.error("Image Generator Error:", error);
     await refundCreditIfNeeded(req);
     res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
@@ -602,12 +548,11 @@ router.post("/whatsapp", async (req, res) => {
     Return ONLY a JSON array of strings:
     ["Option 1", "Option 2", "Option 3"]`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
+    const responseText = await aiProvider.generate({
+      prompt,
+      responseMimeType: "application/json",
+      schemaType: "whatsapp",
+      toolName: "WhatsApp Reply"
     });
 
     // Save history log automatically
@@ -615,10 +560,10 @@ router.post("/whatsapp", async (req, res) => {
       req.user.uid,
       "WhatsApp Reply",
       `Generate WhatsApp reply for: "${message.substring(0, 100)}..."`,
-      response.text
+      responseText
     );
 
-    const finalResult = { options: parseSafeJson(response.text) };
+    const finalResult = { options: parseSafeJson(responseText) };
     await aiCache.set("WhatsApp Reply", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -655,7 +600,7 @@ router.post("/email", async (req, res) => {
     
     Structure the email clearly with a Subject Line, Salutation, Body paragraphs, and a sign-off placeholder. Use clear markdown spacing.`;
 
-    const result = await generateText(prompt);
+    const result = await generateText(prompt, "Email Writer");
 
     // Save history log automatically
     await saveRequestHistory(
@@ -697,7 +642,7 @@ router.post("/translator", async (req, res) => {
     
     "${text}"`;
 
-    const result = await generateText(prompt);
+    const result = await generateText(prompt, "Translator");
 
     // Save history log automatically
     await saveRequestHistory(
@@ -757,7 +702,7 @@ router.post("/code", async (req, res) => {
       Explain the improvements made and show the optimized code.`;
     }
 
-    const result = await generateText(query, "gemini-3.5-flash");
+    const result = await generateText(query, "Code Generator");
 
     // Save history log automatically
     await saveRequestHistory(
@@ -796,7 +741,8 @@ router.post("/scam", async (req, res) => {
     }
 
     let imageUrl = null;
-    let contents;
+    let responseText;
+
     if (imageBase64) {
       const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
@@ -804,42 +750,35 @@ router.post("/scam", async (req, res) => {
       const destinationPath = `users/${req.user.uid}/uploads/scam_${Date.now()}.jpg`;
       imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
 
-      contents = [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `Analyze this image (which is a screenshot of a conversation, chat, email, message, payment receipt, website, etc.) and check if it represents a scam, phishing attempt, or fraudulent activity. If additional text was typed by the user, take it into account: "${message || ""}".
-              
-              Read the text from the screenshot and analyze the conversation context.
-              Evaluate the scam probability (0 to 100), explain why it's a scam or safe, highlight the risk factors (suspicious parts), and provide safety recommendations.
-              Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
-              {
-                "scamProbability": 85,
-                "explanation": "Detailed breakdown of the conversation, message, or receipt shown in the screenshot.",
-                "riskFactors": [
-                  "Suspicious link",
-                  "Urgent threat language",
-                  "Asks for OTP/PIN code"
-                ],
-                "recommendations": [
-                  "Do not tap any links",
-                  "Block and report the sender",
-                  "Do not share any OTP codes"
-                ]
-              }`
-            },
-            {
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: cleanBase64
-              }
-            }
-          ]
-        }
-      ];
+      const promptStr = `Analyze this image (which is a screenshot of a conversation, chat, email, message, payment receipt, website, etc.) and check if it represents a scam, phishing attempt, or fraudulent activity. If additional text was typed by the user, take it into account: "${message || ""}".
+      
+      Read the text from the screenshot and analyze the conversation context.
+      Evaluate the scam probability (0 to 100), explain why it's a scam or safe, highlight the risk factors (suspicious parts), and provide safety recommendations.
+      Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
+      {
+        "scamProbability": 85,
+        "explanation": "Detailed breakdown of the conversation, message, or receipt shown in the screenshot.",
+        "riskFactors": [
+          "Suspicious link",
+          "Urgent threat language",
+          "Asks for OTP/PIN code"
+        ],
+        "recommendations": [
+          "Do not tap any links",
+          "Block and report the sender",
+          "Do not share any OTP codes"
+        ]
+      }`;
+
+      responseText = await aiProvider.generate({
+        prompt: promptStr,
+        images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
+        responseMimeType: "application/json",
+        schemaType: "scam",
+        toolName: "Scam Detector"
+      });
     } else {
-      contents = `Analyze this message and check if it is a scam, phishing attempt, or fraudulent: "${message}".
+      const promptStr = `Analyze this message and check if it is a scam, phishing attempt, or fraudulent: "${message}".
       Evaluate the risk. Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
       {
         "scamProbability": 85,
@@ -855,27 +794,26 @@ router.post("/scam", async (req, res) => {
           "Verify with the official organization"
         ]
       }`;
-    }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents,
-      config: {
+      responseText = await aiProvider.generate({
+        prompt: promptStr,
         responseMimeType: "application/json",
-      },
-    });
+        schemaType: "scam",
+        toolName: "Scam Detector"
+      });
+    }
 
     // Save history log automatically
     await saveRequestHistory(
       req.user.uid,
       "Scam Detector",
       message ? `Scam check for: "${message.substring(0, 100)}..."` : "Scam check screenshot",
-      response.text,
+      responseText,
       imageUrl,
       null
     );
 
-    const finalResult = parseSafeJson(response.text);
+    const finalResult = parseSafeJson(responseText);
     await aiCache.set("Scam Detector", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -904,7 +842,8 @@ router.post("/fake-news", async (req, res) => {
     }
 
     let imageUrl = null;
-    let contents;
+    let responseText;
+
     if (imageBase64) {
       const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
@@ -912,37 +851,30 @@ router.post("/fake-news", async (req, res) => {
       const destinationPath = `users/${req.user.uid}/uploads/fakenews_${Date.now()}.jpg`;
       imageUrl = await uploadBase64ToStorage(cleanBase64, destinationPath);
 
-      contents = [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `Analyze this news image, screenshot (of an X/Twitter post, Facebook post, news article, WhatsApp forward, etc.) and check for fake news, fabricated claims, manipulations, or misleading context. If additional text was provided by the user, incorporate it: "${news || ""}".
-              
-              Read the text from the image, understand its full context, detect bias or manipulation, and output the credibility analysis.
-              Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
-              {
-                "credibilityScore": 45,
-                "verdict": "Suspicious / Fake / True / Misleading / Unverified",
-                "explanation": "A breakdown of the claim's factual accuracy.",
-                "sources": [
-                  "Reliable reference 1 (e.g. Associated Press)",
-                  "Fact-checking reference 2 (e.g. Snopes)"
-                ],
-                "bias": "Left-leaning / Right-leaning / Neutral / Clickbait"
-              }`
-            },
-            {
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: cleanBase64
-              }
-            }
-          ]
-        }
-      ];
+      const promptStr = `Analyze this news image, screenshot (of an X/Twitter post, Facebook post, news article, WhatsApp forward, etc.) and check for fake news, fabricated claims, manipulations, or misleading context. If additional text was provided by the user, incorporate it: "${news || ""}".
+      
+      Read the text from the image, understand its full context, detect bias or manipulation, and output the credibility analysis.
+      Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
+      {
+        "credibilityScore": 45,
+        "verdict": "Suspicious / Fake / True / Misleading / Unverified",
+        "explanation": "A breakdown of the claim's factual accuracy.",
+        "sources": [
+          "Reliable reference 1 (e.g. Associated Press)",
+          "Fact-checking reference 2 (e.g. Snopes)"
+        ],
+        "bias": "Left-leaning / Right-leaning / Neutral / Clickbait"
+      }`;
+
+      responseText = await aiProvider.generate({
+        prompt: promptStr,
+        images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
+        responseMimeType: "application/json",
+        schemaType: "fake-news",
+        toolName: "Fake News Detector"
+      });
     } else {
-      contents = `Critically analyze this news story, claim, or article: "${news}".
+      const promptStr = `Critically analyze this news story, claim, or article: "${news}".
       Verify its facts and determine the credibility. Return ONLY a JSON object matching this schema (do not wrap in markdown, just return raw JSON):
       {
         "credibilityScore": 45,
@@ -954,27 +886,26 @@ router.post("/fake-news", async (req, res) => {
         ],
         "bias": "Left-leaning / Right-leaning / Neutral / Clickbait"
       }`;
-    }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents,
-      config: {
+      responseText = await aiProvider.generate({
+        prompt: promptStr,
         responseMimeType: "application/json",
-      },
-    });
+        schemaType: "fake-news",
+        toolName: "Fake News Detector"
+      });
+    }
 
     // Save history log automatically
     await saveRequestHistory(
       req.user.uid,
       "Fake News Detector",
       news ? `News check for: "${news.substring(0, 100)}..."` : "News check screenshot",
-      response.text,
+      responseText,
       imageUrl,
       null
     );
 
-    const finalResult = parseSafeJson(response.text);
+    const finalResult = parseSafeJson(responseText);
     await aiCache.set("Fake News Detector", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -1004,14 +935,6 @@ router.post("/voice", async (req, res) => {
       return res.json(cached);
     }
 
-    let contents = [];
-    if (history && history.length > 0) {
-      contents = history.map(h => ({
-        role: h.role === "model" ? "model" : "user",
-        parts: h.parts.map(p => ({ text: p.text }))
-      }));
-    }
-
     let audioUrl = null;
 
     if (audioBase64) {
@@ -1032,7 +955,7 @@ router.post("/voice", async (req, res) => {
       const destinationPath = `users/${req.user.uid}/uploads/voice_${Date.now()}.m4a`;
       audioUrl = await uploadBase64ToStorage(cleanAudio, destinationPath);
 
-      const prompt = `Listen to the user speaking in this audio file.
+      const promptStr = `Listen to the user speaking in this audio file.
       1. Transcribe the user's spoken words accurately.
       2. Formulate a short, natural, conversational spoken response (1-2 sentences).
       
@@ -1046,30 +969,17 @@ router.post("/voice", async (req, res) => {
         "answer": "Your conversational response to their question"
       }`;
 
-      contents.push({
-        role: "user",
-        parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              mimeType: "audio/m4a",
-              data: cleanAudio,
-            },
-          },
-        ],
+      const responseText = await aiProvider.generate({
+        prompt: promptStr,
+        audio: { mimeType: "audio/m4a", data: cleanAudio },
+        responseMimeType: "application/json",
+        schemaType: "voice",
+        history,
+        toolName: "Voice Chat"
       });
 
-      console.log("[Voice Route] Sending transcription/response request to Gemini...");
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      console.log("[Voice Route] Gemini raw response text:", response.text);
-      const parsed = parseSafeJson(response.text);
+      console.log("[Voice Route] AI response text:", responseText);
+      const parsed = parseSafeJson(responseText);
 
       // Validate transcription output
       if (
@@ -1103,32 +1013,29 @@ router.post("/voice", async (req, res) => {
       return res.json(finalResult);
 
     } else {
-      contents.push({
-        role: "user",
-        parts: [{ text: `Answer this in a short, natural, conversational spoken tone (1-2 sentences): ${message}` }]
+      const promptStr = `Answer this in a short, natural, conversational spoken tone (1-2 sentences): ${message}`;
+
+      const responseText = await aiProvider.generate({
+        prompt: promptStr,
+        history,
+        toolName: "Voice Chat"
       });
 
-      console.log("[Voice Route] Sending text message request to Gemini...");
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents,
-      });
-
-      console.log("[Voice Route] Gemini text response:", response.text);
+      console.log("[Voice Route] AI text response:", responseText);
 
       // Save history log automatically
       await saveRequestHistory(
         req.user.uid,
         "Voice Chat",
         `Text voice query: "${message}"`,
-        response.text,
+        responseText,
         null,
         null
       );
 
       const finalResult = {
         transcription: message,
-        result: response.text,
+        result: responseText,
       };
       await aiCache.set("Voice Chat", cacheInputs, finalResult);
 
