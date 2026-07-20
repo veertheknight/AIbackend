@@ -545,8 +545,23 @@ router.post("/whatsapp", async (req, res) => {
     - Length: ${length || "short"} (short: one sentence/quick; long: detailed/thoughtful)
     
     Provide 3 distinct response variations.
-    Return ONLY a JSON array of strings:
-    ["Option 1", "Option 2", "Option 3"]`;
+    Return ONLY a JSON object matching this exact schema (do not wrap in markdown or add extra text):
+    {
+      "options": [
+        {
+          "tone": "${tone || "friendly"}",
+          "reply": "First reply variation text..."
+        },
+        {
+          "tone": "professional",
+          "reply": "Second reply variation text..."
+        },
+        {
+          "tone": "casual",
+          "reply": "Third reply variation text..."
+        }
+      ]
+    }`;
 
     const responseText = await aiProvider.generate({
       prompt,
@@ -555,15 +570,25 @@ router.post("/whatsapp", async (req, res) => {
       toolName: "WhatsApp Reply"
     });
 
+    const parsedData = parseSafeJson(responseText);
+    
+    // Format options cleanly for frontend response and history
+    let replyOptions = [];
+    if (parsedData && Array.isArray(parsedData.options)) {
+      replyOptions = parsedData.options.map(opt => typeof opt === "string" ? opt : (opt.reply || opt.text || JSON.stringify(opt)));
+    } else if (Array.isArray(parsedData)) {
+      replyOptions = parsedData.map(opt => typeof opt === "string" ? opt : (opt.reply || opt.text || JSON.stringify(opt)));
+    }
+
     // Save history log automatically
     await saveRequestHistory(
       req.user.uid,
       "WhatsApp Reply",
       `Generate WhatsApp reply for: "${message.substring(0, 100)}..."`,
-      responseText
+      replyOptions.join("\n\n")
     );
 
-    const finalResult = { options: parseSafeJson(responseText) };
+    const finalResult = { options: replyOptions };
     await aiCache.set("WhatsApp Reply", cacheInputs, finalResult);
 
     res.json(finalResult);
