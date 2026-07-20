@@ -45,6 +45,10 @@ async function authenticateMiddleware(req, res, next) {
 // Helper to refund credit on route failure if the user is not a guest
 async function refundCreditIfNeeded(req) {
   try {
+    const DEV_MONETIZATION_BYPASS = true;
+    if (DEV_MONETIZATION_BYPASS) {
+      return;
+    }
     if (req.user && !req.user.isGuest) {
       const userRef = adminDb.collection("users").doc(req.user.uid);
       await userRef.update({
@@ -132,6 +136,12 @@ const upload = multer({ dest: "uploads/" });
 // Middleware to verify and deduct credits for all AI routes securely
 async function checkCreditsMiddleware(req, res, next) {
   try {
+    const DEV_MONETIZATION_BYPASS = true;
+    if (DEV_MONETIZATION_BYPASS) {
+      console.log(`[Development Mode] Credits verification bypassed.`);
+      return next();
+    }
+
     if (!req.user) {
       return res.status(401).json({ error: "Unauthorized: User not authenticated" });
     }
