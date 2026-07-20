@@ -4,6 +4,7 @@ import fs from "fs";
 import { createRequire } from "module";
 import { ai } from "../services/gemini.js";
 import admin, { adminDb, FieldValue, adminAuth, adminStorage } from "../services/firebase.js";
+import { aiCache } from "../services/aiCache.js";
 
 const require = createRequire(import.meta.url);
 const { PDFParse } = require("pdf-parse");
@@ -251,6 +252,14 @@ router.post("/homework", async (req, res) => {
       return res.status(400).json({ error: "Missing question or image" });
     }
 
+    // Check Cache
+    const cacheInputs = { question, imageBase64 };
+    const cached = await aiCache.get("Homework Solver", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
+    }
+
     let imageUrl = null;
     let contents;
     if (imageBase64) {
@@ -300,7 +309,10 @@ router.post("/homework", async (req, res) => {
       null
     );
 
-    res.json({ result: response.text });
+    const finalResult = { result: response.text };
+    await aiCache.set("Homework Solver", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Homework Error:", error);
     await refundCreditIfNeeded(req);
@@ -315,24 +327,40 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
       return res.status(400).json({ error: "No PDF file uploaded" });
     }
 
-    // Upload to Firebase Storage
-    const destinationPath = `users/${req.user.uid}/uploads/pdf_${Date.now()}.pdf`;
-    const pdfUrl = await uploadFileToStorage(req.file.path, destinationPath, "application/pdf");
-
     const dataBuffer = fs.readFileSync(req.file.path);
     const parser = new PDFParse({ data: dataBuffer });
     const pdfData = await parser.getText();
     const text = pdfData.text;
+
+    if (!text || text.trim().length === 0) {
+      // Clean up temp file
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+      return res.status(400).json({ error: "Failed to extract text from PDF." });
+    }
+
+    // Check Cache
+    const cacheInputs = { text };
+    const cached = await aiCache.get("PDF Summary", cacheInputs);
+    if (cached) {
+      // Clean up temp file
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
+    }
+
+    // Upload to Firebase Storage (only on cache miss!)
+    const destinationPath = `users/${req.user.uid}/uploads/pdf_${Date.now()}.pdf`;
+    const pdfUrl = await uploadFileToStorage(req.file.path, destinationPath, "application/pdf");
 
     // clean up uploaded file
     try {
       fs.unlinkSync(req.file.path);
     } catch (e) {
       console.error("Temp file cleanup failed:", e);
-    }
-
-    if (!text || text.trim().length === 0) {
-      return res.status(400).json({ error: "Failed to extract text from PDF." });
     }
 
     const prompt = `Analyze the following PDF content and generate a comprehensive summary.
@@ -372,9 +400,18 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
       pdfUrl
     );
 
-    res.json(parseSafeJson(response.text));
+    const finalResult = parseSafeJson(response.text);
+    await aiCache.set("PDF Summary", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("PDF Summary Error:", error);
+    // Clean up temp file in case of error
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+    }
     await refundCreditIfNeeded(req);
     res.status(500).json({ error: getFriendlyErrorMessage(error) });
   }
@@ -387,6 +424,14 @@ router.post("/image-analyzer", async (req, res) => {
 
     if (!imageBase64) {
       return res.status(400).json({ error: "Missing image data" });
+    }
+
+    // Check Cache
+    const cacheInputs = { imageBase64, mode };
+    const cached = await aiCache.get("Image Analyzer", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     let cleanBase64 = imageBase64;
@@ -437,7 +482,10 @@ router.post("/image-analyzer", async (req, res) => {
       null
     );
 
-    res.json({ result: response.text });
+    const finalResult = { result: response.text };
+    await aiCache.set("Image Analyzer", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Image Analyzer Error:", error);
     await refundCreditIfNeeded(req);
@@ -452,6 +500,14 @@ router.post("/image-generator", async (req, res) => {
 
     if (!prompt) {
       return res.status(400).json({ error: "Missing prompt" });
+    }
+
+    // Check Cache
+    const cacheInputs = { prompt, style };
+    const cached = await aiCache.get("Image Generator", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
@@ -485,7 +541,10 @@ router.post("/image-generator", async (req, res) => {
           null
         );
 
-        return res.json({ imageUrl });
+        const finalResult = { imageUrl };
+        await aiCache.set("Image Generator", cacheInputs, finalResult);
+
+        return res.json(finalResult);
       }
     } catch (apiError) {
       console.log("Imagen model unavailable/restricted, invoking premium Unsplash fallback. Error:", apiError.message);
@@ -505,7 +564,10 @@ router.post("/image-generator", async (req, res) => {
       null
     );
 
-    return res.json({ imageUrl: fallbackUrl });
+    const finalResult = { imageUrl: fallbackUrl };
+    await aiCache.set("Image Generator", cacheInputs, finalResult);
+
+    return res.json(finalResult);
   } catch (error) {
     console.error("Image Generator Fallback Error:", error);
     await refundCreditIfNeeded(req);
@@ -520,6 +582,14 @@ router.post("/whatsapp", async (req, res) => {
 
     if (!message) {
       return res.status(400).json({ error: "Missing message" });
+    }
+
+    // Check Cache
+    const cacheInputs = { message, tone, length };
+    const cached = await aiCache.get("WhatsApp Reply", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     const prompt = `Create a WhatsApp response for this incoming message: "${message}".
@@ -548,7 +618,10 @@ router.post("/whatsapp", async (req, res) => {
       response.text
     );
 
-    res.json({ options: parseSafeJson(response.text) });
+    const finalResult = { options: parseSafeJson(response.text) };
+    await aiCache.set("WhatsApp Reply", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("WhatsApp Reply Error:", error);
     await refundCreditIfNeeded(req);
@@ -563,6 +636,14 @@ router.post("/email", async (req, res) => {
 
     if (!purpose) {
       return res.status(400).json({ error: "Missing purpose" });
+    }
+
+    // Check Cache
+    const cacheInputs = { purpose, tone, details };
+    const cached = await aiCache.get("Email Writer", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     const prompt = `Write a high-quality email draft.
@@ -584,7 +665,10 @@ router.post("/email", async (req, res) => {
       result
     );
 
-    res.json({ result });
+    const finalResult = { result };
+    await aiCache.set("Email Writer", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Email Writer Error:", error);
     await refundCreditIfNeeded(req);
@@ -601,6 +685,14 @@ router.post("/translator", async (req, res) => {
       return res.status(400).json({ error: "Missing text or targetLanguage" });
     }
 
+    // Check Cache
+    const cacheInputs = { text, targetLanguage };
+    const cached = await aiCache.get("Translator", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
+    }
+
     const prompt = `Translate the following text into ${targetLanguage}. Return ONLY the direct translation, do not add introductory remarks or explanation:
     
     "${text}"`;
@@ -615,7 +707,10 @@ router.post("/translator", async (req, res) => {
       result.trim()
     );
 
-    res.json({ result: result.trim() });
+    const finalResult = { result: result.trim() };
+    await aiCache.set("Translator", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Translator Error:", error);
     await refundCreditIfNeeded(req);
@@ -630,6 +725,14 @@ router.post("/code", async (req, res) => {
 
     if (!action) {
       return res.status(400).json({ error: "Missing action" });
+    }
+
+    // Check Cache
+    const cacheInputs = { code, language, action, prompt };
+    const cached = await aiCache.get("Code Generator", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     let query = "";
@@ -664,7 +767,10 @@ router.post("/code", async (req, res) => {
       result
     );
 
-    res.json({ result });
+    const finalResult = { result };
+    await aiCache.set("Code Generator", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Code Generator Error:", error);
     await refundCreditIfNeeded(req);
@@ -679,6 +785,14 @@ router.post("/scam", async (req, res) => {
 
     if (!message && !imageBase64) {
       return res.status(400).json({ error: "Missing text message or screenshot image" });
+    }
+
+    // Check Cache
+    const cacheInputs = { message, imageBase64 };
+    const cached = await aiCache.get("Scam Detector", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     let imageUrl = null;
@@ -761,7 +875,10 @@ router.post("/scam", async (req, res) => {
       null
     );
 
-    res.json(parseSafeJson(response.text));
+    const finalResult = parseSafeJson(response.text);
+    await aiCache.set("Scam Detector", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Scam Detector Error:", error);
     await refundCreditIfNeeded(req);
@@ -776,6 +893,14 @@ router.post("/fake-news", async (req, res) => {
 
     if (!news && !imageBase64) {
       return res.status(400).json({ error: "Missing news text or screenshot image" });
+    }
+
+    // Check Cache
+    const cacheInputs = { news, imageBase64 };
+    const cached = await aiCache.get("Fake News Detector", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     let imageUrl = null;
@@ -849,7 +974,10 @@ router.post("/fake-news", async (req, res) => {
       null
     );
 
-    res.json(parseSafeJson(response.text));
+    const finalResult = parseSafeJson(response.text);
+    await aiCache.set("Fake News Detector", cacheInputs, finalResult);
+
+    res.json(finalResult);
   } catch (error) {
     console.error("Fake News Detector Error:", error);
     await refundCreditIfNeeded(req);
@@ -866,6 +994,14 @@ router.post("/voice", async (req, res) => {
     if (!message && !audioBase64) {
       console.warn("[Voice Route] Validation Failure: Missing text message or audio input");
       return res.status(400).json({ error: "Missing text message or audio input" });
+    }
+
+    // Check Cache
+    const cacheInputs = { message, audioBase64, history };
+    const cached = await aiCache.get("Voice Chat", cacheInputs);
+    if (cached) {
+      await refundCreditIfNeeded(req);
+      return res.json(cached);
     }
 
     let contents = [];
@@ -958,10 +1094,13 @@ router.post("/voice", async (req, res) => {
         audioUrl
       );
 
-      return res.json({
+      const finalResult = {
         transcription: parsed.transcription,
         result: parsed.answer,
-      });
+      };
+      await aiCache.set("Voice Chat", cacheInputs, finalResult);
+
+      return res.json(finalResult);
 
     } else {
       contents.push({
@@ -987,10 +1126,13 @@ router.post("/voice", async (req, res) => {
         null
       );
 
-      return res.json({
+      const finalResult = {
         transcription: message,
         result: response.text,
-      });
+      };
+      await aiCache.set("Voice Chat", cacheInputs, finalResult);
+
+      return res.json(finalResult);
     }
   } catch (error) {
     console.error("[Voice Route] Exception occurred:", error);
