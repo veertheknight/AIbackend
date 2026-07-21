@@ -266,6 +266,7 @@ router.post("/homework", async (req, res) => {
     const cacheInputs = { question, imageBase64 };
     const cached = await aiCache.get("Homework Solver", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Homework Solver", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -344,6 +345,7 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     const cacheInputs = { text };
     const cached = await aiCache.get("PDF Summary", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "PDF Summary", Cache: Hit`);
       // Clean up temp file
       try {
         fs.unlinkSync(req.file.path);
@@ -429,6 +431,7 @@ router.post("/image-analyzer", async (req, res) => {
     const cacheInputs = { imageBase64, mode };
     const cached = await aiCache.get("Image Analyzer", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Image Analyzer", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -491,6 +494,7 @@ router.post("/image-generator", async (req, res) => {
     const cacheInputs = { prompt, style };
     const cached = await aiCache.get("Image Generator", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Image Generator", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -544,6 +548,7 @@ router.post("/whatsapp", async (req, res) => {
     const cacheInputs = { message, tone, length };
     const cached = await aiCache.get("WhatsApp Reply", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "WhatsApp Reply", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -622,6 +627,7 @@ router.post("/email", async (req, res) => {
     const cacheInputs = { purpose, tone, details };
     const cached = await aiCache.get("Email Writer", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Email Writer", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -669,6 +675,7 @@ router.post("/translator", async (req, res) => {
     const cacheInputs = { text, targetLanguage };
     const cached = await aiCache.get("Translator", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Translator", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -711,6 +718,7 @@ router.post("/code", async (req, res) => {
     const cacheInputs = { code, language, action, prompt };
     const cached = await aiCache.get("Code Generator", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Code Generator", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -771,6 +779,7 @@ router.post("/scam", async (req, res) => {
     const cacheInputs = { message, imageBase64 };
     const cached = await aiCache.get("Scam Detector", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Scam Detector", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -872,6 +881,7 @@ router.post("/fake-news", async (req, res) => {
     const cacheInputs = { news, imageBase64 };
     const cached = await aiCache.get("Fake News Detector", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Fake News Detector", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }
@@ -966,6 +976,7 @@ router.post("/voice", async (req, res) => {
     const cacheInputs = { message, audioBase64, history };
     const cached = await aiCache.get("Voice Chat", cacheInputs);
     if (cached) {
+      console.log(`[AI Provider Manager] Tool: "Voice Chat", Cache: Hit`);
       await refundCreditIfNeeded(req);
       return res.json(cached);
     }

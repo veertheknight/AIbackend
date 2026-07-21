@@ -3,13 +3,33 @@ import GroqProvider from "./groq.js";
 import OpenRouterProvider from "./openrouter.js";
 import OpenAIProvider from "./openai.js";
 
-// List of providers in priority order
-const providers = [
-  GeminiProvider,
-  GroqProvider,
-  OpenRouterProvider,
-  OpenAIProvider
-];
+// Mapping of provider names to their implementations
+const providerMap = {
+  "Gemini": GeminiProvider,
+  "Groq": GroqProvider,
+  "OpenRouter": OpenRouterProvider,
+  "OpenAI": OpenAIProvider
+};
+
+// Tool-specific provider priority orders
+const toolPriorities = {
+  "Image Generator": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
+  "Homework Solver": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
+  "Voice Assistant": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
+  "Voice Chat": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
+  "Image Analyzer": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
+  "Resume Builder": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
+  "Resume": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
+  "Email Writer": ["OpenAI", "OpenRouter", "Groq", "Gemini"],
+  "WhatsApp Reply": ["Groq", "OpenRouter", "OpenAI", "Gemini"],
+  "Translator": ["Groq", "OpenRouter", "OpenAI", "Gemini"],
+  "Code Generator": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
+  "Code Assistant": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
+  "Code": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
+  "PDF Summary": ["OpenRouter", "OpenAI", "Gemini", "Groq"],
+  "Scam Detector": ["OpenRouter", "OpenAI", "Gemini", "Groq"],
+  "Fake News Detector": ["OpenRouter", "OpenAI", "Gemini", "Groq"]
+};
 
 /**
  * 1. Clean and extract valid JSON substring from provider output.
@@ -227,20 +247,33 @@ export async function generate(params) {
   }
 
   const startTime = Date.now();
-  console.log(`[AI Provider Manager] [Incoming Request] Tool: "${toolName}", Prompt Length: ${prompt ? prompt.length : 0}`);
+  
+  // Resolve priority list for the selected tool (defaults to Gemini -> OpenAI -> OpenRouter -> Groq)
+  const priorityList = toolPriorities[toolName] || ["Gemini", "OpenAI", "OpenRouter", "Groq"];
+  const activeProviders = priorityList.map(name => providerMap[name]).filter(Boolean);
+
+  console.log(`[AI Provider Manager] [Incoming Request]`);
+  console.log(`  - Selected Tool: "${toolName}"`);
+  console.log(`  - Selected Provider Order: ${priorityList.join(" -> ")}`);
+  console.log(`  - Cache: Miss`);
 
   let lastError = null;
 
-  // 2. Try each provider in sequence (Gemini -> Groq -> OpenRouter)
-  for (const provider of providers) {
+  // Try each provider in the resolved priority list
+  for (let i = 0; i < activeProviders.length; i++) {
+    const provider = activeProviders[i];
+    const fallbackProvider = activeProviders[i + 1];
+    const fallbackName = fallbackProvider ? fallbackProvider.name : "None";
+
     let attempt = 0;
     const maxRetries = 2; // Attempt 1 + 1-time regeneration retry before provider switch
     const timeoutMs = 25000; // 25s timeout
 
     while (attempt < maxRetries) {
       attempt++;
-      console.log(`[AI Provider Manager] [Attempt ${attempt}] Sending request to provider: "${provider.name}"`);
-      
+      console.log(`[AI Provider Manager] [Attempt ${attempt}] Current Provider: "${provider.name}"`);
+      console.log(`  - Fallback Provider: "${fallbackName}"`);
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -272,14 +305,16 @@ export async function generate(params) {
         }
 
         const duration = Date.now() - startTime;
-        console.log(`[AI Provider Manager] [Success] Provider: "${provider.name}", Duration: ${duration}ms, Final Provider Used: "${provider.name}"`);
+        console.log(`[AI Provider Manager] [Success]`);
+        console.log(`  - Final Provider Used: "${provider.name}"`);
+        console.log(`  - Provider Duration: ${duration}ms`);
 
         return finalOutput;
       } catch (err) {
         clearTimeout(timeoutId);
         const isTimeout = controller.signal?.aborted || err.name === "AbortError" || err.message.includes("Timeout");
         
-        console.warn(`[AI Provider Manager] [Error] Provider: "${provider.name}", Attempt: ${attempt}, Timeout: ${isTimeout}, Error: "${err.message}"`);
+        console.warn(`[AI Provider Manager] [Failure] Provider: "${provider.name}", Attempt: ${attempt}, Timeout: ${isTimeout}, Error: "${err.message}"`);
         lastError = err;
 
         if (attempt < maxRetries) {
@@ -289,7 +324,9 @@ export async function generate(params) {
       }
     }
 
-    console.log(`[AI Provider Manager] [Provider Switch] Provider "${provider.name}" exhausted after regeneration retry. Switching to next fallback.`);
+    if (fallbackProvider) {
+      console.log(`[AI Provider Manager] [Provider Switch] Switching to "${fallbackName}"`);
+    }
   }
 
   console.error(`[AI Provider Manager] [Failure] All providers exhausted. Final error: "${lastError?.message}"`);
