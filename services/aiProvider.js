@@ -1,12 +1,14 @@
 import GeminiProvider from "./gemini.js";
 import GroqProvider from "./groq.js";
 import OpenRouterProvider from "./openrouter.js";
+import OpenAIProvider from "./openai.js";
 
 // List of providers in priority order
 const providers = [
   GeminiProvider,
   GroqProvider,
-  OpenRouterProvider
+  OpenRouterProvider,
+  OpenAIProvider
 ];
 
 /**
