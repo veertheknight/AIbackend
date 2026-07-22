@@ -7,7 +7,18 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors());
+// Configure CORS with exposed headers for provider & cache tracking
+app.use(cors({
+  origin: "*",
+  exposedHeaders: ["X-AI-Provider", "X-Provider-Used", "X-Cache-Hit", "x-ai-provider", "x-provider-used", "x-cache-hit"]
+}));
+
+// Express middleware to ensure Access-Control-Expose-Headers is set on every response
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Expose-Headers", "X-AI-Provider, X-Provider-Used, X-Cache-Hit, x-ai-provider, x-provider-used, x-cache-hit");
+  next();
+});
+
 // Set body parser limits to handle large base64 image strings
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));

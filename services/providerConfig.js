@@ -32,7 +32,7 @@ export const providerTimeouts = {
   gemini: 12000,    // 12 seconds
   groq: 10000,      // 10 seconds
   openai: 15000,    // 15 seconds
-  openrouter: 20000 // 20 seconds
+  openrouter: 12000 // 12 seconds
 };
 
 export function getToolProviderPriority(toolName) {

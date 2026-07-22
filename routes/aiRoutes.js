@@ -313,7 +313,8 @@ router.post("/homework", async (req, res) => {
       null
     );
 
-    const finalResult = { result: responseText };
+    const providerKey = res.getHeader("X-AI-Provider") || res.getHeader("X-Provider-Used") || "gemini";
+    const finalResult = { result: responseText, provider: providerKey };
     await aiCache.set("Homework Solver", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -395,20 +396,22 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
       res
     });
 
+    const parsed = parseSafeJson(responseText);
+    parsed.provider = res.getHeader("X-AI-Provider") || "openrouter";
+
     // Save history log automatically
     await saveRequestHistory(
       req.user.uid,
       "PDF Summary",
       `Summarized document: ${req.file.originalname || "Uploaded PDF"}`,
-      responseText,
-      null,
-      pdfUrl
+      parsed.summary || responseText,
+      pdfUrl,
+      null
     );
 
-    const finalResult = parseSafeJson(responseText);
-    await aiCache.set("PDF Summary", cacheInputs, finalResult);
+    await aiCache.set("PDF Summary", cacheInputs, parsed);
 
-    res.json(finalResult);
+    res.json(parsed);
   } catch (error) {
     console.error("PDF Summary Error:", error);
     // Clean up temp file in case of error
@@ -475,7 +478,8 @@ router.post("/image-analyzer", async (req, res) => {
       null
     );
 
-    const finalResult = { result: responseText };
+    const providerKey = res.getHeader("X-AI-Provider") || "gemini";
+    const finalResult = { result: responseText, provider: providerKey };
     await aiCache.set("Image Analyzer", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -529,7 +533,12 @@ router.post("/image-generator", async (req, res) => {
       null
     );
 
-    const finalResult = { imageUrl };
+    const providerKey = imageResult.provider || res.getHeader("X-AI-Provider") || "gemini";
+    const finalResult = {
+      ...imageResult,
+      status: statusText,
+      provider: providerKey
+    };
     await aiCache.set("Image Generator", cacheInputs, finalResult);
 
     return res.json(finalResult);
@@ -592,6 +601,7 @@ router.post("/whatsapp", async (req, res) => {
     });
 
     const parsedData = parseSafeJson(responseText);
+    parsedData.provider = res.getHeader("X-AI-Provider") || "groq";
     
     // Format options cleanly for frontend response and history
     let replyOptions = [];
@@ -605,14 +615,15 @@ router.post("/whatsapp", async (req, res) => {
     await saveRequestHistory(
       req.user.uid,
       "WhatsApp Reply",
-      `Generate WhatsApp reply for: "${message.substring(0, 100)}..."`,
-      replyOptions.join("\n\n")
+      `Message: "${message}" (${tone || "friendly"}, ${length || "short"})`,
+      JSON.stringify(parsedData.options || parsedData),
+      null,
+      null
     );
 
-    const finalResult = { options: replyOptions };
-    await aiCache.set("WhatsApp Reply", cacheInputs, finalResult);
+    await aiCache.set("WhatsApp Reply", cacheInputs, parsedData);
 
-    res.json(finalResult);
+    return res.json(parsedData);
   } catch (error) {
     console.error("WhatsApp Reply Error:", error);
     await refundCreditIfNeeded(req);
@@ -657,7 +668,8 @@ router.post("/email", async (req, res) => {
       result
     );
 
-    const finalResult = { result };
+    const providerKey = res.getHeader("X-AI-Provider") || "openai";
+    const finalResult = { result, provider: providerKey };
     await aiCache.set("Email Writer", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -700,7 +712,8 @@ router.post("/translator", async (req, res) => {
       result.trim()
     );
 
-    const finalResult = { result: result.trim() };
+    const providerKey = res.getHeader("X-AI-Provider") || "groq";
+    const finalResult = { result: result.trim(), provider: providerKey };
     await aiCache.set("Translator", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -761,7 +774,8 @@ router.post("/code", async (req, res) => {
       result
     );
 
-    const finalResult = { result };
+    const providerKey = res.getHeader("X-AI-Provider") || "openai";
+    const finalResult = { result, provider: providerKey };
     await aiCache.set("Code Generator", cacheInputs, finalResult);
 
     res.json(finalResult);
@@ -1091,9 +1105,11 @@ router.post("/voice", async (req, res) => {
         null
       );
 
+      const providerKey = res.getHeader("X-AI-Provider") || "openai";
       const finalResult = {
         transcription: message,
         result: responseText,
+        provider: providerKey
       };
       await aiCache.set("Voice Chat", cacheInputs, finalResult);
 

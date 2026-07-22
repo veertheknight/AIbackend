@@ -1,12 +1,12 @@
 {
-  "stopReason": "Duration Limit (60s) Reached",
+  "stopReason": "Test Completed",
   "config": {
     "BACKEND_URL": "https://aibackend-nuqf.onrender.com",
     "ROUTE": "/api/ai/homework",
-    "TEST_MODE": "rpm",
+    "TEST_MODE": "concurrent",
     "TEST_DURATION_SECONDS": 60,
-    "TOTAL_REQUESTS": 100,
-    "CONCURRENT_USERS": 5,
+    "TOTAL_REQUESTS": 20,
+    "CONCURRENT_USERS": 3,
     "RAMP_STEP": 5,
     "RAMP_INTERVAL": 5,
     "TIMEOUT": 30000,
@@ -15,33 +15,33 @@
     "PROMPT": "$P$G"
   },
   "summary": {
-    "durationSeconds": "78.03",
-    "totalSent": 30,
-    "successful": 28,
-    "failed": 2,
-    "successRate": "93.33%",
-    "failureRate": "6.67%",
+    "durationSeconds": "31.65",
+    "totalSent": 20,
+    "successful": 20,
+    "failed": 0,
+    "successRate": "100.00%",
+    "failureRate": "0.00%",
     "latenciesMs": {
-      "average": 5784,
-      "medianP50": 3916,
-      "p95": 19460,
-      "p99": 19930,
-      "fastest": 3211,
-      "slowest": 19930
+      "average": 4501,
+      "medianP50": 633,
+      "p95": 26230,
+      "p99": 26230,
+      "fastest": 587,
+      "slowest": 26230
     },
     "throughput": {
-      "maxConcurrentUsers": 5,
+      "maxConcurrentUsers": 3,
       "peakRps": 0.5,
       "peakRpm": 30,
-      "averageRps": 0.36,
-      "averageRpm": 22,
-      "estimatedRph": 1320
+      "averageRps": 0.63,
+      "averageRpm": 38,
+      "estimatedRph": 2280
     },
     "cache": {
       "hitRate": "0.0%",
       "missRate": "100.0%",
       "hits": 0,
-      "misses": 28
+      "misses": 20
     },
     "providerAnalysis": {
       "GEMINI": {
@@ -81,19 +81,19 @@
         "slowestMs": 0
       },
       "UNKNOWN": {
-        "requests": 30,
-        "successes": 28,
-        "failures": 2,
+        "requests": 20,
+        "successes": 20,
+        "failures": 0,
         "usagePercentage": "100.0%",
-        "avgLatencyMs": "5784",
-        "fastestMs": 3211,
-        "slowestMs": 19930
+        "avgLatencyMs": "4501",
+        "fastestMs": 587,
+        "slowestMs": 26230
       }
     },
     "failureBreakdown": {
       "err429": 0,
       "err500": 0,
-      "timeout": 2,
+      "timeout": 0,
       "networkError": 0,
       "jsonError": 0,
       "authError": 0,
@@ -104,42 +104,9 @@
   "logs": [
     {
       "reqId": 3,
-      "startTime": 1784727379363,
-      "endTime": 1784727386999,
-      "duration": 7636,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 1,
-      "startTime": 1784727379326,
-      "endTime": 1784727398658,
-      "duration": 19332,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 4,
-      "startTime": 1784727379365,
-      "endTime": 1784727398825,
-      "duration": 19460,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 5,
-      "startTime": 1784727379367,
-      "endTime": 1784727399297,
-      "duration": 19930,
+      "startTime": 1784733538162,
+      "endTime": 1784733564324,
+      "duration": 26162,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -148,20 +115,9 @@
     },
     {
       "reqId": 2,
-      "startTime": 1784727379361,
-      "endTime": 1784727409387,
-      "duration": 30026,
-      "statusCode": 408,
-      "success": false,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": "Request Timeout"
-    },
-    {
-      "reqId": 6,
-      "startTime": 1784727409493,
-      "endTime": 1784727412745,
-      "duration": 3252,
+      "startTime": 1784733538157,
+      "endTime": 1784733564328,
+      "duration": 26171,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -169,10 +125,43 @@
       "errorMsg": null
     },
     {
-      "reqId": 9,
-      "startTime": 1784727409504,
-      "endTime": 1784727413057,
-      "duration": 3553,
+      "reqId": 1,
+      "startTime": 1784733538099,
+      "endTime": 1784733564329,
+      "duration": 26230,
+      "statusCode": 200,
+      "success": true,
+      "provider": "unknown",
+      "isCacheHit": false,
+      "errorMsg": null
+    },
+    {
+      "reqId": 4,
+      "startTime": 1784733564433,
+      "endTime": 1784733565095,
+      "duration": 662,
+      "statusCode": 200,
+      "success": true,
+      "provider": "unknown",
+      "isCacheHit": false,
+      "errorMsg": null
+    },
+    {
+      "reqId": 5,
+      "startTime": 1784733564436,
+      "endTime": 1784733565096,
+      "duration": 660,
+      "statusCode": 200,
+      "success": true,
+      "provider": "unknown",
+      "isCacheHit": false,
+      "errorMsg": null
+    },
+    {
+      "reqId": 6,
+      "startTime": 1784733564438,
+      "endTime": 1784733565410,
+      "duration": 972,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -181,20 +170,9 @@
     },
     {
       "reqId": 8,
-      "startTime": 1784727409500,
-      "endTime": 1784727413320,
-      "duration": 3820,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 10,
-      "startTime": 1784727409509,
-      "endTime": 1784727413494,
-      "duration": 3985,
+      "startTime": 1784733565522,
+      "endTime": 1784733566136,
+      "duration": 614,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -203,9 +181,9 @@
     },
     {
       "reqId": 7,
-      "startTime": 1784727409497,
-      "endTime": 1784727413829,
-      "duration": 4332,
+      "startTime": 1784733565520,
+      "endTime": 1784733566153,
+      "duration": 633,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -213,32 +191,10 @@
       "errorMsg": null
     },
     {
-      "reqId": 14,
-      "startTime": 1784727413938,
-      "endTime": 1784727417548,
-      "duration": 3610,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 12,
-      "startTime": 1784727413936,
-      "endTime": 1784727417567,
-      "duration": 3631,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 15,
-      "startTime": 1784727413941,
-      "endTime": 1784727417679,
-      "duration": 3738,
+      "reqId": 9,
+      "startTime": 1784733565524,
+      "endTime": 1784733566194,
+      "duration": 670,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -247,9 +203,31 @@
     },
     {
       "reqId": 11,
-      "startTime": 1784727413934,
-      "endTime": 1784727417969,
-      "duration": 4035,
+      "startTime": 1784733566299,
+      "endTime": 1784733566903,
+      "duration": 604,
+      "statusCode": 200,
+      "success": true,
+      "provider": "unknown",
+      "isCacheHit": false,
+      "errorMsg": null
+    },
+    {
+      "reqId": 12,
+      "startTime": 1784733566301,
+      "endTime": 1784733566917,
+      "duration": 616,
+      "statusCode": 200,
+      "success": true,
+      "provider": "unknown",
+      "isCacheHit": false,
+      "errorMsg": null
+    },
+    {
+      "reqId": 10,
+      "startTime": 1784733566297,
+      "endTime": 1784733566918,
+      "duration": 621,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -258,9 +236,9 @@
     },
     {
       "reqId": 13,
-      "startTime": 1784727413937,
-      "endTime": 1784727418313,
-      "duration": 4376,
+      "startTime": 1784733567032,
+      "endTime": 1784733567654,
+      "duration": 622,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -268,10 +246,10 @@
       "errorMsg": null
     },
     {
-      "reqId": 16,
-      "startTime": 1784727418425,
-      "endTime": 1784727421696,
-      "duration": 3271,
+      "reqId": 15,
+      "startTime": 1784733567035,
+      "endTime": 1784733567655,
+      "duration": 620,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -279,32 +257,10 @@
       "errorMsg": null
     },
     {
-      "reqId": 20,
-      "startTime": 1784727418428,
-      "endTime": 1784727422342,
-      "duration": 3914,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 18,
-      "startTime": 1784727418427,
-      "endTime": 1784727422343,
-      "duration": 3916,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 19,
-      "startTime": 1784727418428,
-      "endTime": 1784727422344,
-      "duration": 3916,
+      "reqId": 14,
+      "startTime": 1784733567033,
+      "endTime": 1784733567970,
+      "duration": 937,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -313,9 +269,9 @@
     },
     {
       "reqId": 17,
-      "startTime": 1784727418426,
-      "endTime": 1784727422848,
-      "duration": 4422,
+      "startTime": 1784733568081,
+      "endTime": 1784733568672,
+      "duration": 591,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -323,10 +279,10 @@
       "errorMsg": null
     },
     {
-      "reqId": 25,
-      "startTime": 1784727422968,
-      "endTime": 1784727426179,
-      "duration": 3211,
+      "reqId": 16,
+      "startTime": 1784733568080,
+      "endTime": 1784733568684,
+      "duration": 604,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -334,10 +290,10 @@
       "errorMsg": null
     },
     {
-      "reqId": 22,
-      "startTime": 1784727422965,
-      "endTime": 1784727426497,
-      "duration": 3532,
+      "reqId": 18,
+      "startTime": 1784733568082,
+      "endTime": 1784733568713,
+      "duration": 631,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -345,10 +301,10 @@
       "errorMsg": null
     },
     {
-      "reqId": 23,
-      "startTime": 1784727422966,
-      "endTime": 1784727426598,
-      "duration": 3632,
+      "reqId": 19,
+      "startTime": 1784733568823,
+      "endTime": 1784733569410,
+      "duration": 587,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
@@ -356,81 +312,15 @@
       "errorMsg": null
     },
     {
-      "reqId": 24,
-      "startTime": 1784727422967,
-      "endTime": 1784727426823,
-      "duration": 3856,
+      "reqId": 20,
+      "startTime": 1784733568825,
+      "endTime": 1784733569638,
+      "duration": 813,
       "statusCode": 200,
       "success": true,
       "provider": "unknown",
       "isCacheHit": false,
       "errorMsg": null
-    },
-    {
-      "reqId": 21,
-      "startTime": 1784727422964,
-      "endTime": 1784727427137,
-      "duration": 4173,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 26,
-      "startTime": 1784727427239,
-      "endTime": 1784727430744,
-      "duration": 3505,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 28,
-      "startTime": 1784727427241,
-      "endTime": 1784727431268,
-      "duration": 4027,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 27,
-      "startTime": 1784727427241,
-      "endTime": 1784727431641,
-      "duration": 4400,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 30,
-      "startTime": 1784727427243,
-      "endTime": 1784727434728,
-      "duration": 7485,
-      "statusCode": 200,
-      "success": true,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": null
-    },
-    {
-      "reqId": 29,
-      "startTime": 1784727427242,
-      "endTime": 1784727457251,
-      "duration": 30009,
-      "statusCode": 408,
-      "success": false,
-      "provider": "unknown",
-      "isCacheHit": false,
-      "errorMsg": "Request Timeout"
     }
   ]
 }
