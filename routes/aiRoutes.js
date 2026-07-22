@@ -206,10 +206,11 @@ router.use(authenticateMiddleware);
 router.use(checkCreditsMiddleware);
 
 // Helper to handle simple text generation using centralized AI manager
-async function generateText(prompt, toolName = "AI Tool") {
+async function generateText(prompt, toolName = "AI Tool", res = null) {
   return await aiProvider.generate({
     prompt,
-    toolName
+    toolName,
+    res
   });
 }
 
@@ -287,7 +288,8 @@ router.post("/homework", async (req, res) => {
       responseText = await aiProvider.generate({
         prompt: question || "Solve the homework in this image. Give a complete step-by-step explanation with correct formulas and formatting.",
         images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
-        toolName: "Homework Solver"
+        toolName: "Homework Solver",
+        res
       });
     } else {
       const prompt = `You are a professional Homework Solver. Solve the following question in detail using clear step-by-step formatting (markdown). Cover formulas, concepts, and write a thorough response:
@@ -296,7 +298,8 @@ router.post("/homework", async (req, res) => {
 
       responseText = await aiProvider.generate({
         prompt,
-        toolName: "Homework Solver"
+        toolName: "Homework Solver",
+        res
       });
     }
 
@@ -388,7 +391,8 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
       prompt,
       responseMimeType: "application/json",
       schemaType: "pdf",
-      toolName: "PDF Summary"
+      toolName: "PDF Summary",
+      res
     });
 
     // Save history log automatically
@@ -457,7 +461,8 @@ router.post("/image-analyzer", async (req, res) => {
     const responseText = await aiProvider.generate({
       prompt: instruction,
       images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
-      toolName: "Image Analyzer"
+      toolName: "Image Analyzer",
+      res
     });
 
     // Save history log automatically
@@ -501,7 +506,7 @@ router.post("/image-generator", async (req, res) => {
 
     const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
 
-    const imageResult = await aiProvider.generateImage({ prompt, style });
+    const imageResult = await aiProvider.generateImage({ prompt, style, res });
 
     let imageUrl = null;
     let statusText = "Generated art image (native)";
@@ -582,7 +587,8 @@ router.post("/whatsapp", async (req, res) => {
       prompt,
       responseMimeType: "application/json",
       schemaType: "whatsapp",
-      toolName: "WhatsApp Reply"
+      toolName: "WhatsApp Reply",
+      res
     });
 
     const parsedData = parseSafeJson(responseText);
@@ -641,7 +647,7 @@ router.post("/email", async (req, res) => {
     
     Structure the email clearly with a Subject Line, Salutation, Body paragraphs, and a sign-off placeholder. Use clear markdown spacing.`;
 
-    const result = await generateText(prompt, "Email Writer");
+    const result = await generateText(prompt, "Email Writer", res);
 
     // Save history log automatically
     await saveRequestHistory(
@@ -684,7 +690,7 @@ router.post("/translator", async (req, res) => {
     
     "${text}"`;
 
-    const result = await generateText(prompt, "Translator");
+    const result = await generateText(prompt, "Translator", res);
 
     // Save history log automatically
     await saveRequestHistory(
@@ -745,7 +751,7 @@ router.post("/code", async (req, res) => {
       Explain the improvements made and show the optimized code.`;
     }
 
-    const result = await generateText(query, "Code Generator");
+    const result = await generateText(query, "Code Generator", res);
 
     // Save history log automatically
     await saveRequestHistory(
@@ -819,7 +825,8 @@ router.post("/scam", async (req, res) => {
         images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
         responseMimeType: "application/json",
         schemaType: "scam",
-        toolName: "Scam Detector"
+        toolName: "Scam Detector",
+        res
       });
     } else {
       const promptStr = `Analyze this message and check if it is a scam, phishing attempt, or fraudulent: "${message}".
@@ -843,7 +850,8 @@ router.post("/scam", async (req, res) => {
         prompt: promptStr,
         responseMimeType: "application/json",
         schemaType: "scam",
-        toolName: "Scam Detector"
+        toolName: "Scam Detector",
+        res
       });
     }
 
@@ -916,7 +924,8 @@ router.post("/fake-news", async (req, res) => {
         images: [{ mimeType: "image/jpeg", data: cleanBase64 }],
         responseMimeType: "application/json",
         schemaType: "fake-news",
-        toolName: "Fake News Detector"
+        toolName: "Fake News Detector",
+        res
       });
     } else {
       const promptStr = `Critically analyze this news story, claim, or article: "${news}".
@@ -936,7 +945,8 @@ router.post("/fake-news", async (req, res) => {
         prompt: promptStr,
         responseMimeType: "application/json",
         schemaType: "fake-news",
-        toolName: "Fake News Detector"
+        toolName: "Fake News Detector",
+        res
       });
     }
 
@@ -1021,7 +1031,8 @@ router.post("/voice", async (req, res) => {
         responseMimeType: "application/json",
         schemaType: "voice",
         history,
-        toolName: "Voice Chat"
+        toolName: "Voice Chat",
+        res
       });
 
       console.log("[Voice Route] AI response text:", responseText);
@@ -1064,7 +1075,8 @@ router.post("/voice", async (req, res) => {
       const responseText = await aiProvider.generate({
         prompt: promptStr,
         history,
-        toolName: "Voice Chat"
+        toolName: "Voice Chat",
+        res
       });
 
       console.log("[Voice Route] AI text response:", responseText);

@@ -104,18 +104,33 @@ process.on("SIGINT", () => {
  */
 function detectProvider(response) {
   if (!response) return "unknown";
-  const pHeader = (
-    response.headers?.["x-provider-used"] ||
-    response.headers?.["x-provider"] ||
-    response.data?.provider ||
-    response.data?.providerUsed ||
+
+  const headers = response.headers || {};
+  const pHeader = String(
+    headers["x-ai-provider"] ||
+    headers["x-provider-used"] ||
+    headers["x-provider"] ||
+    headers["X-AI-Provider"] ||
+    headers["X-Provider-Used"] ||
     ""
-  ).toLowerCase();
+  ).toLowerCase().trim();
 
   if (pHeader.includes("gemini")) return "gemini";
   if (pHeader.includes("groq")) return "groq";
   if (pHeader.includes("openrouter")) return "openrouter";
   if (pHeader.includes("openai")) return "openai";
+
+  const bodyProvider = String(
+    response.data?.provider ||
+    response.data?.providerUsed ||
+    response.data?.aiProvider ||
+    ""
+  ).toLowerCase().trim();
+
+  if (bodyProvider.includes("gemini")) return "gemini";
+  if (bodyProvider.includes("groq")) return "groq";
+  if (bodyProvider.includes("openrouter")) return "openrouter";
+  if (bodyProvider.includes("openai")) return "openai";
 
   const strBody = JSON.stringify(response.data || "").toLowerCase();
   if (strBody.includes("gemini")) return "gemini";

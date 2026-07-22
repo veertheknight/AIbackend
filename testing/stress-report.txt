@@ -1,0 +1,48 @@
+====================================
+        AI Load Test Report
+====================================
+Stop Reason:                   Duration Limit (60s) Reached
+Test Mode:                     RPM
+Duration:                      78.03 seconds
+Total Requests Sent:           30
+Successful Requests:           28
+Failed Requests:               2
+Success Rate:                  93.33%
+Failure Rate:                  6.67%
+
+Latency Statistics:
+- Average Latency:             5784 ms
+- Median Latency (p50):        3916 ms
+- 95th Percentile (p95):       19460 ms
+- 99th Percentile (p99):       19930 ms
+- Fastest Request:             3211 ms
+- Slowest Request:             19930 ms
+
+Throughput & Capacity Projections:
+- Maximum Concurrent Users:    5
+- Peak Requests Per Second:    0.5 RPS
+- Peak Requests Per Minute:    30 RPM
+- Average Requests Per Second: 0.36 RPS
+- Average Requests Per Minute: 22 RPM
+- Estimated Requests Per Hour: 1320 RPH
+
+Cache Statistics:
+- Cache Hit Rate:              0.0% (0)
+- Cache Miss Rate:             100.0% (28)
+
+Provider Distribution & Performance:
+  • GEMINI: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
+  • GROQ: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
+  • OPENROUTER: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
+  • OPENAI: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
+  • UNKNOWN: 100.0% | Requests: 30 | Successes: 28 | Avg Latency: 5784ms
+
+Failure Breakdown:
+- 429 Rate Limits:             0
+- 500 Server Errors:           0
+- Request Timeouts:            2
+- Network Errors:              0
+- JSON Parsing Errors:         0
+- Authentication Errors:       0
+- Provider Exhausted Errors:   0
+====================================

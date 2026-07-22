@@ -93,9 +93,9 @@ export function attemptJsonRepair(text) {
     let openBrackets = (str.match(/\[/g) || []).length - (str.match(/\]/g) || []).length;
 
     let patched = str;
-    while (openBraces > 0) {
+    while (openBrackets > 0) {
       patched += "]";
-      openBraces--;
+      openBrackets--;
     }
     while (openBraces > 0) {
       patched += "}";
@@ -213,7 +213,8 @@ export async function generate(params) {
     history,
     schemaType,
     toolName = "AI Tool",
-    userType = "Signed In"
+    userType = "Signed In",
+    res
   } = params;
 
   // 1. Request Validation
@@ -305,6 +306,12 @@ export async function generate(params) {
 
         finishSuccess(providerKey, pDuration);
 
+        // Expose selected provider via HTTP headers on response object
+        if (res && typeof res.setHeader === "function") {
+          res.setHeader("X-AI-Provider", providerKey);
+          res.setHeader("X-Provider-Used", providerKey);
+        }
+
         console.log(`[AI Provider Manager] [Success]`);
         console.log(`  - Timestamp: ${new Date().toISOString()}`);
         console.log(`  - Tool: "${toolName}"`);
@@ -350,20 +357,28 @@ export async function generate(params) {
 /**
  * Image generation manager wrapper.
  */
-export async function generateImage({ prompt, style }) {
+export async function generateImage({ prompt, style, res }) {
   const startTime = Date.now();
   console.log(`[AI Provider Manager] [Incoming Request] Tool: "Image Generator", Prompt: "${prompt}"`);
 
   try {
     const base64Bytes = await GeminiProvider.generateImage({ prompt, style });
     const duration = Date.now() - startTime;
+    if (res && typeof res.setHeader === "function") {
+      res.setHeader("X-AI-Provider", "gemini");
+      res.setHeader("X-Provider-Used", "gemini");
+    }
     console.log(`[AI Provider Manager] [Success] Image Generator via Gemini, Duration: ${duration}ms`);
-    return { base64Bytes };
+    return { base64Bytes, provider: "gemini" };
   } catch (err) {
     console.warn(`[AI Provider Manager] [Failure] Gemini Image Generation failed, invoking fallback: "${err.message}"`);
     const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
     const fallbackUrl = `https://image.pollinations.ai/p/${encodeURIComponent(styledPrompt)}?width=600&height=600&nologo=true`;
-    return { fallbackUrl };
+    if (res && typeof res.setHeader === "function") {
+      res.setHeader("X-AI-Provider", "pollinations");
+      res.setHeader("X-Provider-Used", "pollinations");
+    }
+    return { fallbackUrl, provider: "pollinations" };
   }
 }
 
