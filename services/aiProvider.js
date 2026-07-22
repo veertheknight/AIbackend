@@ -2,33 +2,24 @@ import GeminiProvider from "./gemini.js";
 import GroqProvider from "./groq.js";
 import OpenRouterProvider from "./openrouter.js";
 import OpenAIProvider from "./openai.js";
+import { getToolProviderPriority, getProviderTimeout } from "./providerConfig.js";
+import {
+  isProviderHealthy,
+  startRequest,
+  finishSuccess,
+  finishFailure
+} from "./providerHealth.js";
 
-// Mapping of provider names to their implementations
+// Mapping of provider keys to their implementations
 const providerMap = {
+  "gemini": GeminiProvider,
+  "groq": GroqProvider,
+  "openrouter": OpenRouterProvider,
+  "openai": OpenAIProvider,
   "Gemini": GeminiProvider,
   "Groq": GroqProvider,
   "OpenRouter": OpenRouterProvider,
   "OpenAI": OpenAIProvider
-};
-
-// Tool-specific provider priority orders
-const toolPriorities = {
-  "Image Generator": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
-  "Homework Solver": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
-  "Voice Assistant": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
-  "Voice Chat": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
-  "Image Analyzer": ["Gemini", "OpenAI", "OpenRouter", "Groq"],
-  "Resume Builder": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
-  "Resume": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
-  "Email Writer": ["OpenAI", "OpenRouter", "Groq", "Gemini"],
-  "WhatsApp Reply": ["Groq", "OpenRouter", "OpenAI", "Gemini"],
-  "Translator": ["Groq", "OpenRouter", "OpenAI", "Gemini"],
-  "Code Generator": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
-  "Code Assistant": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
-  "Code": ["OpenAI", "Gemini", "OpenRouter", "Groq"],
-  "PDF Summary": ["OpenRouter", "OpenAI", "Gemini", "Groq"],
-  "Scam Detector": ["OpenRouter", "OpenAI", "Gemini", "Groq"],
-  "Fake News Detector": ["OpenRouter", "OpenAI", "Gemini", "Groq"]
 };
 
 /**
@@ -102,9 +93,9 @@ export function attemptJsonRepair(text) {
     let openBrackets = (str.match(/\[/g) || []).length - (str.match(/\]/g) || []).length;
 
     let patched = str;
-    while (openBrackets > 0) {
+    while (openBraces > 0) {
       patched += "]";
-      openBrackets--;
+      openBraces--;
     }
     while (openBraces > 0) {
       patched += "}";
@@ -126,12 +117,10 @@ export function validateAndRepairSchema(jsonObj, schemaType) {
   let json = jsonObj;
 
   if (schemaType === "whatsapp") {
-    // Repair top-level structure if provider returned a raw array
     if (Array.isArray(json)) {
       json = { options: json };
     } else if (json && typeof json === "object") {
       if (!Array.isArray(json.options)) {
-        // Look for array under alternative keys (e.g. replies, variations, data)
         const altKey = Object.keys(json).find(k => Array.isArray(json[k]));
         if (altKey) {
           json.options = json[altKey];
@@ -139,12 +128,10 @@ export function validateAndRepairSchema(jsonObj, schemaType) {
       }
     }
 
-    // Validate options exists and is an array
     if (!json || !Array.isArray(json.options) || json.options.length === 0) {
       throw new Error("Validation failed: 'options' must be a non-empty array");
     }
 
-    // Repair items in options array to ensure each item is { tone, reply }
     json.options = json.options.map((item) => {
       if (typeof item === "string") {
         return {
@@ -165,7 +152,6 @@ export function validateAndRepairSchema(jsonObj, schemaType) {
       };
     });
 
-    // Final strict validation check
     for (const opt of json.options) {
       if (typeof opt.tone !== "string" || typeof opt.reply !== "string") {
         throw new Error("Validation failed: Every option must contain tone and reply strings");
@@ -214,7 +200,7 @@ export function validateAndRepairSchema(jsonObj, schemaType) {
 }
 
 /**
- * Orchestrates AI calls with automatic provider failovers, timeouts, validations and retries.
+ * Orchestrates AI calls with smart tool-wise provider selection, health monitoring, timeouts, validations and automatic failovers.
  */
 export async function generate(params) {
   const {
@@ -227,6 +213,7 @@ export async function generate(params) {
     history,
     schemaType,
     toolName = "AI Tool",
+    userType = "Signed In"
   } = params;
 
   // 1. Request Validation
@@ -247,38 +234,48 @@ export async function generate(params) {
   }
 
   const startTime = Date.now();
-  
-  // Resolve priority list for the selected tool (defaults to Gemini -> OpenAI -> OpenRouter -> Groq)
-  const priorityList = toolPriorities[toolName] || ["Gemini", "OpenAI", "OpenRouter", "Groq"];
-  const activeProviders = priorityList.map(name => providerMap[name]).filter(Boolean);
+  const priorityList = getToolProviderPriority(toolName);
+  const attemptedProviders = [];
+  let lastError = null;
 
   console.log(`[AI Provider Manager] [Incoming Request]`);
-  console.log(`  - Selected Tool: "${toolName}"`);
+  console.log(`  - Timestamp: ${new Date().toISOString()}`);
+  console.log(`  - Tool: "${toolName}"`);
   console.log(`  - Selected Provider Order: ${priorityList.join(" -> ")}`);
   console.log(`  - Cache: Miss`);
 
-  let lastError = null;
+  // 2. Iterate through provider priority list
+  for (let i = 0; i < priorityList.length; i++) {
+    const providerKey = priorityList[i].toLowerCase();
+    const providerObj = providerMap[providerKey];
 
-  // Try each provider in the resolved priority list
-  for (let i = 0; i < activeProviders.length; i++) {
-    const provider = activeProviders[i];
-    const fallbackProvider = activeProviders[i + 1];
-    const fallbackName = fallbackProvider ? fallbackProvider.name : "None";
+    if (!providerObj) {
+      continue;
+    }
 
-    let attempt = 0;
-    const maxRetries = 2; // Attempt 1 + 1-time regeneration retry before provider switch
-    const timeoutMs = 25000; // 25s timeout
+    // Step 3: Check Provider Health & Cooldown
+    if (!isProviderHealthy(providerKey)) {
+      console.log(`[AI Provider Manager] Provider "${providerKey}" is currently in cooldown (unhealthy). Skipping.`);
+      continue;
+    }
 
-    while (attempt < maxRetries) {
-      attempt++;
-      console.log(`[AI Provider Manager] [Attempt ${attempt}] Current Provider: "${provider.name}"`);
-      console.log(`  - Fallback Provider: "${fallbackName}"`);
+    const timeoutMs = getProviderTimeout(providerKey);
+    const fallbackKey = priorityList[i + 1] ? priorityList[i + 1].toLowerCase() : "None";
 
+    attemptedProviders.push(providerKey);
+    startRequest(providerKey);
+
+    let maxAttempts = 1;
+    let currentAttempt = 0;
+
+    while (currentAttempt < maxAttempts) {
+      currentAttempt++;
+      const pStartTime = Date.now();
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const rawResponse = await provider.generate({
+        const rawResponse = await providerObj.generate({
           prompt,
           systemInstruction,
           images,
@@ -291,7 +288,6 @@ export async function generate(params) {
 
         clearTimeout(timeoutId);
 
-        // Check empty response
         if (!rawResponse || rawResponse.trim().length === 0) {
           throw new Error("Provider returned an empty response.");
         }
@@ -304,32 +300,50 @@ export async function generate(params) {
           finalOutput = JSON.stringify(repairedJson);
         }
 
-        const duration = Date.now() - startTime;
+        const pDuration = Date.now() - pStartTime;
+        const totalDuration = Date.now() - startTime;
+
+        finishSuccess(providerKey, pDuration);
+
         console.log(`[AI Provider Manager] [Success]`);
-        console.log(`  - Final Provider Used: "${provider.name}"`);
-        console.log(`  - Provider Duration: ${duration}ms`);
+        console.log(`  - Timestamp: ${new Date().toISOString()}`);
+        console.log(`  - Tool: "${toolName}"`);
+        console.log(`  - Final Provider Used: "${providerKey}"`);
+        console.log(`  - Providers Attempted: [${attemptedProviders.join(", ")}]`);
+        console.log(`  - Latency: ${totalDuration}ms`);
+        console.log(`  - User Type: ${userType}`);
 
         return finalOutput;
+
       } catch (err) {
         clearTimeout(timeoutId);
-        const isTimeout = controller.signal?.aborted || err.name === "AbortError" || err.message.includes("Timeout");
-        
-        console.warn(`[AI Provider Manager] [Failure] Provider: "${provider.name}", Attempt: ${attempt}, Timeout: ${isTimeout}, Error: "${err.message}"`);
+        const pDuration = Date.now() - pStartTime;
+        const isTimeout = controller.signal?.aborted || err.name === "AbortError" || err.message.toLowerCase().includes("timeout");
+        const isQuotaError = err.message.includes("429") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("rate limit");
+
+        finishFailure(providerKey, err.message);
         lastError = err;
 
-        if (attempt < maxRetries) {
-          console.log(`[AI Provider Manager] Parsing/Schema failed for "${provider.name}". Attempting 1-time regeneration...`);
-          await new Promise(resolve => setTimeout(resolve, 800));
+        console.warn(`[AI Provider Manager] [Failure] Tool: "${toolName}", Provider: "${providerKey}", Latency: ${pDuration}ms, Timeout: ${isTimeout}, Quota Error: ${isQuotaError}, Reason: "${err.message}"`);
+
+        // Smart Retry logic: Retry ONLY once if it is a temporary network glitch (e.g. ECONNRESET)
+        const isNetworkGlitch = (err.code === "ECONNRESET" || err.code === "ETIMEDOUT" || err.code === "ENOTFOUND") && !isTimeout && !isQuotaError;
+        if (isNetworkGlitch && currentAttempt < 2) {
+          maxAttempts = 2;
+          console.log(`[AI Provider Manager] Temporary network glitch detected on "${providerKey}". Retrying once...`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+          // Immediately switch to next provider on timeouts, 429s, or schema errors
+          if (fallbackKey !== "None") {
+            console.log(`[AI Provider Manager] [Provider Switch] Immediately switching from "${providerKey}" to fallback "${fallbackKey}"`);
+          }
+          break;
         }
       }
     }
-
-    if (fallbackProvider) {
-      console.log(`[AI Provider Manager] [Provider Switch] Switching to "${fallbackName}"`);
-    }
   }
 
-  console.error(`[AI Provider Manager] [Failure] All providers exhausted. Final error: "${lastError?.message}"`);
+  console.error(`[AI Provider Manager] [Failure] All providers exhausted for tool "${toolName}". Final error: "${lastError?.message}"`);
   throw new Error("All AI services are temporarily unavailable. Please try again shortly.");
 }
 

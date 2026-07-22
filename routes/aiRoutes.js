@@ -1094,4 +1094,17 @@ router.post("/voice", async (req, res) => {
   }
 });
 
+// 12. Provider Health & Analytics Monitoring Endpoint
+router.get("/provider-health", async (req, res) => {
+  try {
+    const { getAllProviderHealth } = await import("../services/providerHealth.js");
+    res.json({
+      timestamp: new Date().toISOString(),
+      health: getAllProviderHealth()
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
