@@ -4,17 +4,29 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 // ----------------------------------------------------
-// Top Configuration Variables
+// Parse CLI Arguments & Environment Variables
 // ----------------------------------------------------
+const cliArgs = {};
+process.argv.slice(2).forEach(arg => {
+  const cleanArg = arg.replace(/^--/, "");
+  const equalsIdx = cleanArg.indexOf("=");
+  if (equalsIdx !== -1) {
+    const key = cleanArg.substring(0, equalsIdx).toUpperCase();
+    const value = cleanArg.substring(equalsIdx + 1);
+    cliArgs[key] = value;
+  }
+});
+
+// Top Configuration Variables with Windows & Cross-Platform Support
 export const CONFIG = {
-  BACKEND_URL: process.env.BACKEND_URL || "http://localhost:5000",
-  ROUTE: process.env.ROUTE || "/api/ai/homework",
-  PROMPT: process.env.PROMPT || "Explain Newton's Second Law of Motion in simple terms.",
-  NUMBER_OF_REQUESTS: Number(process.env.NUMBER_OF_REQUESTS) || 20,
-  CONCURRENT_REQUESTS: Number(process.env.CONCURRENT_REQUESTS) || 2,
-  DELAY_BETWEEN_REQUESTS: Number(process.env.DELAY_BETWEEN_REQUESTS) || 300, // ms
-  TIMEOUT: Number(process.env.TIMEOUT) || 30000, // 30s
-  USER_UID: process.env.USER_UID || "guest_stress_tester"
+  BACKEND_URL: cliArgs.BACKEND_URL || cliArgs.URL || process.env.BACKEND_URL || "https://aibackend-nuqf.onrender.com",
+  ROUTE: cliArgs.ROUTE || process.env.ROUTE || "/api/ai/homework",
+  PROMPT: cliArgs.PROMPT || process.env.PROMPT || "Explain Newton's Second Law of Motion in simple terms.",
+  NUMBER_OF_REQUESTS: Number(cliArgs.NUMBER_OF_REQUESTS || cliArgs.REQUESTS || process.env.NUMBER_OF_REQUESTS) || 20,
+  CONCURRENT_REQUESTS: Number(cliArgs.CONCURRENT_REQUESTS || cliArgs.CONCURRENCY || process.env.CONCURRENT_REQUESTS) || 3,
+  DELAY_BETWEEN_REQUESTS: Number(cliArgs.DELAY_BETWEEN_REQUESTS || cliArgs.DELAY || process.env.DELAY_BETWEEN_REQUESTS) || 300, // ms
+  TIMEOUT: Number(cliArgs.TIMEOUT || process.env.TIMEOUT) || 30000, // 30s
+  USER_UID: cliArgs.USER_UID || process.env.USER_UID || "guest_stress_tester"
 };
 
 // ----------------------------------------------------
