@@ -214,6 +214,32 @@ async function generateText(prompt, toolName = "AI Tool", res = null) {
   });
 }
 
+/**
+ * sendWithProvider — PERMANENT FIX for provider tracking.
+ *
+ * Always sets X-AI-Provider header before sending any JSON response,
+ * whether it is a live AI call or a cache hit.
+ *
+ * Provider resolution priority:
+ *   1. Header already set by aiProvider.generate() (live calls)
+ *   2. `provider` field stored in the cached response object (cache hits)
+ *   3. "unknown" only when neither exists (never for successful requests)
+ *
+ * Mobile clients ignore unknown headers — fully backward compatible.
+ */
+function sendWithProvider(res, data) {
+  const existingHeader = res.getHeader("X-AI-Provider") || res.getHeader("X-Provider-Used");
+  const cachedProvider = (data && data.provider) ? data.provider : null;
+  const resolvedProvider = (existingHeader || cachedProvider || "unknown").toLowerCase();
+
+  res.setHeader("X-AI-Provider", resolvedProvider);
+  res.setHeader("X-Provider-Used", resolvedProvider);
+
+  const responseBody = Object.assign({}, data, { provider: resolvedProvider });
+  return res.json(responseBody);
+}
+
+
 // Helper to parse JSON safely, stripping off any markdown code blocks returned by AI model variations
 function parseSafeJson(text) {
   let cleanText = (text || "").trim();
@@ -269,7 +295,7 @@ router.post("/homework", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Homework Solver", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     let imageUrl = null;
@@ -317,7 +343,7 @@ router.post("/homework", async (req, res) => {
     const finalResult = { result: responseText, provider: providerKey };
     await aiCache.set("Homework Solver", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Homework Error:", error);
     await refundCreditIfNeeded(req);
@@ -355,7 +381,7 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
         fs.unlinkSync(req.file.path);
       } catch (e) {}
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     // Upload to Firebase Storage (only on cache miss!)
@@ -411,7 +437,7 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
 
     await aiCache.set("PDF Summary", cacheInputs, parsed);
 
-    res.json(parsed);
+    return sendWithProvider(res, parsed);
   } catch (error) {
     console.error("PDF Summary Error:", error);
     // Clean up temp file in case of error
@@ -440,7 +466,7 @@ router.post("/image-analyzer", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Image Analyzer", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     let cleanBase64 = imageBase64;
@@ -482,7 +508,7 @@ router.post("/image-analyzer", async (req, res) => {
     const finalResult = { result: responseText, provider: providerKey };
     await aiCache.set("Image Analyzer", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Image Analyzer Error:", error);
     await refundCreditIfNeeded(req);
@@ -505,7 +531,7 @@ router.post("/image-generator", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Image Generator", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
@@ -541,7 +567,7 @@ router.post("/image-generator", async (req, res) => {
     };
     await aiCache.set("Image Generator", cacheInputs, finalResult);
 
-    return res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Image Generator Error:", error);
     await refundCreditIfNeeded(req);
@@ -564,7 +590,7 @@ router.post("/whatsapp", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "WhatsApp Reply", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     const prompt = `Create a WhatsApp response for this incoming message: "${message}".
@@ -623,7 +649,7 @@ router.post("/whatsapp", async (req, res) => {
 
     await aiCache.set("WhatsApp Reply", cacheInputs, parsedData);
 
-    return res.json(parsedData);
+    return sendWithProvider(res, parsedData);
   } catch (error) {
     console.error("WhatsApp Reply Error:", error);
     await refundCreditIfNeeded(req);
@@ -646,7 +672,7 @@ router.post("/email", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Email Writer", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     const prompt = `Write a high-quality email draft.
@@ -672,7 +698,7 @@ router.post("/email", async (req, res) => {
     const finalResult = { result, provider: providerKey };
     await aiCache.set("Email Writer", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Email Writer Error:", error);
     await refundCreditIfNeeded(req);
@@ -695,7 +721,7 @@ router.post("/translator", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Translator", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     const prompt = `Translate the following text into ${targetLanguage}. Return ONLY the direct translation, do not add introductory remarks or explanation:
@@ -716,7 +742,7 @@ router.post("/translator", async (req, res) => {
     const finalResult = { result: result.trim(), provider: providerKey };
     await aiCache.set("Translator", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Translator Error:", error);
     await refundCreditIfNeeded(req);
@@ -739,7 +765,7 @@ router.post("/code", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Code Generator", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     let query = "";
@@ -778,7 +804,7 @@ router.post("/code", async (req, res) => {
     const finalResult = { result, provider: providerKey };
     await aiCache.set("Code Generator", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Code Generator Error:", error);
     await refundCreditIfNeeded(req);
@@ -801,7 +827,7 @@ router.post("/scam", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Scam Detector", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     let imageUrl = null;
@@ -882,7 +908,7 @@ router.post("/scam", async (req, res) => {
     const finalResult = parseSafeJson(responseText);
     await aiCache.set("Scam Detector", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Scam Detector Error:", error);
     await refundCreditIfNeeded(req);
@@ -905,7 +931,7 @@ router.post("/fake-news", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Fake News Detector", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     let imageUrl = null;
@@ -977,7 +1003,7 @@ router.post("/fake-news", async (req, res) => {
     const finalResult = parseSafeJson(responseText);
     await aiCache.set("Fake News Detector", cacheInputs, finalResult);
 
-    res.json(finalResult);
+    return sendWithProvider(res, finalResult);
   } catch (error) {
     console.error("Fake News Detector Error:", error);
     await refundCreditIfNeeded(req);
@@ -1002,7 +1028,7 @@ router.post("/voice", async (req, res) => {
     if (cached) {
       console.log(`[AI Provider Manager] Tool: "Voice Chat", Cache: Hit`);
       await refundCreditIfNeeded(req);
-      return res.json(cached);
+      return sendWithProvider(res, cached);
     }
 
     let audioUrl = null;
@@ -1081,7 +1107,7 @@ router.post("/voice", async (req, res) => {
       };
       await aiCache.set("Voice Chat", cacheInputs, finalResult);
 
-      return res.json(finalResult);
+      return sendWithProvider(res, finalResult);
 
     } else {
       const promptStr = `Answer this in a short, natural, conversational spoken tone (1-2 sentences): ${message}`;
@@ -1113,7 +1139,7 @@ router.post("/voice", async (req, res) => {
       };
       await aiCache.set("Voice Chat", cacheInputs, finalResult);
 
-      return res.json(finalResult);
+      return sendWithProvider(res, finalResult);
     }
   } catch (error) {
     console.error("[Voice Route] Exception occurred:", error);
