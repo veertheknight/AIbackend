@@ -1,48 +1,48 @@
 ====================================
         AI Load Test Report
 ====================================
-Stop Reason:                   All Providers Exhausted
+Stop Reason:                   Test Completed
 Test Mode:                     CONCURRENT
-Duration:                      10.27 seconds
-Total Requests Sent:           140
-Successful Requests:           127
-Failed Requests:               13
-Success Rate:                  90.71%
-Failure Rate:                  9.29%
+Duration:                      109.00 seconds
+Total Requests Sent:           20
+Successful Requests:           15
+Failed Requests:               5
+Success Rate:                  75.00%
+Failure Rate:                  25.00%
 
 Latency Statistics:
-- Average Latency:             648 ms
-- Median Latency (p50):        464 ms
-- 95th Percentile (p95):       1361 ms
-- 99th Percentile (p99):       1523 ms
-- Fastest Request:             320 ms
-- Slowest Request:             1532 ms
+- Average Latency:             7379 ms
+- Median Latency (p50):        4171 ms
+- 95th Percentile (p95):       28090 ms
+- 99th Percentile (p99):       28090 ms
+- Fastest Request:             3665 ms
+- Slowest Request:             28090 ms
 
 Throughput & Capacity Projections:
-- Maximum Concurrent Users:    20
-- Peak Requests Per Second:    19.6 RPS
-- Peak Requests Per Minute:    1176 RPM
-- Average Requests Per Second: 12.37 RPS
-- Average Requests Per Minute: 742 RPM
-- Estimated Requests Per Hour: 44520 RPH
+- Maximum Concurrent Users:    3
+- Peak Requests Per Second:    0.2 RPS
+- Peak Requests Per Minute:    12 RPM
+- Average Requests Per Second: 0.14 RPS
+- Average Requests Per Minute: 8 RPM
+- Estimated Requests Per Hour: 480 RPH
 
 Cache Statistics:
 - Cache Hit Rate:              0.0% (0)
-- Cache Miss Rate:             100.0% (127)
+- Cache Miss Rate:             100.0% (15)
 
 Provider Distribution & Performance:
-  • GEMINI: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
-  • GROQ: 29.1% | Requests: 37 | Successes: 37 | Avg Latency: 875ms
-  • OPENROUTER: 3.1% | Requests: 4 | Successes: 4 | Avg Latency: 1134ms
+  • GEMINI: 13.3% | Requests: 2 | Successes: 2 | Avg Latency: 27513ms
+  • GROQ: 86.7% | Requests: 13 | Successes: 13 | Avg Latency: 4281ms
+  • OPENROUTER: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
   • OPENAI: 0.0% | Requests: 0 | Successes: 0 | Avg Latency: 0ms
-  • UNKNOWN: 67.7% | Requests: 99 | Successes: 86 | Avg Latency: 528ms
+  • UNKNOWN: 0.0% | Requests: 5 | Successes: 0 | Avg Latency: 0ms
 
 Failure Breakdown:
 - 429 Rate Limits:             0
-- 500 Server Errors:           13
-- Request Timeouts:            0
+- 500 Server Errors:           0
+- Request Timeouts:            5
 - Network Errors:              0
 - JSON Parsing Errors:         0
 - Authentication Errors:       0
-- Provider Exhausted Errors:   13
+- Provider Exhausted Errors:   0
 ====================================

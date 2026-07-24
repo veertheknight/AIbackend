@@ -77,7 +77,7 @@ export const GeminiProvider = {
   async generateImage({ prompt, style }) {
     const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
     const response = await ai.models.generateImages({
-      model: "imagen-3.0-generate-002",
+      model: "imagen-4.0-fast-generate-001",
       prompt: styledPrompt,
       config: {
         numberOfImages: 1,
