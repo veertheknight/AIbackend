@@ -354,37 +354,8 @@ export async function generate(params) {
   throw new Error("All AI services are temporarily unavailable. Please try again shortly.");
 }
 
-/**
- * Image generation manager wrapper.
- */
-export async function generateImage({ prompt, style, res }) {
-  const startTime = Date.now();
-  console.log(`[AI Provider Manager] [Incoming Request] Tool: "Image Generator", Prompt: "${prompt}"`);
-
-  try {
-    const base64Bytes = await GeminiProvider.generateImage({ prompt, style });
-    const duration = Date.now() - startTime;
-    if (res && typeof res.setHeader === "function") {
-      res.setHeader("X-AI-Provider", "gemini");
-      res.setHeader("X-Provider-Used", "gemini");
-    }
-    console.log(`[AI Provider Manager] [Success] Image Generator via Gemini, Duration: ${duration}ms`);
-    return { base64Bytes, provider: "gemini" };
-  } catch (err) {
-    console.warn(`[AI Provider Manager] [Failure] Gemini Image Generation failed, invoking fallback: "${err.message}"`);
-    const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
-    const fallbackUrl = `https://image.pollinations.ai/p/${encodeURIComponent(styledPrompt)}?width=600&height=600&nologo=true`;
-    if (res && typeof res.setHeader === "function") {
-      res.setHeader("X-AI-Provider", "pollinations");
-      res.setHeader("X-Provider-Used", "pollinations");
-    }
-    return { fallbackUrl, provider: "pollinations" };
-  }
-}
-
 export default {
   generate,
-  generateImage,
   cleanAndExtractJson,
   attemptJsonRepair,
   validateAndRepairSchema

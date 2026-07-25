@@ -516,64 +516,6 @@ router.post("/image-analyzer", async (req, res) => {
   }
 });
 
-// 4. Image Generator
-router.post("/image-generator", async (req, res) => {
-  try {
-    const { prompt, style } = req.body;
-
-    if (!prompt) {
-      return res.status(400).json({ error: "Missing prompt" });
-    }
-
-    // Check Cache
-    const cacheInputs = { prompt, style };
-    const cached = await aiCache.get("Image Generator", cacheInputs);
-    if (cached) {
-      console.log(`[AI Provider Manager] Tool: "Image Generator", Cache: Hit`);
-      await refundCreditIfNeeded(req);
-      return sendWithProvider(res, cached);
-    }
-
-    const styledPrompt = style ? `A beautiful image in ${style} style: ${prompt}` : prompt;
-
-    const imageResult = await aiProvider.generateImage({ prompt, style, res });
-
-    let imageUrl = null;
-    let statusText = "Generated art image (native)";
-
-    if (imageResult.base64Bytes) {
-      const destinationPath = `users/${req.user.uid}/generations/art_${Date.now()}.jpg`;
-      imageUrl = await uploadBase64ToStorage(imageResult.base64Bytes, destinationPath);
-    } else {
-      imageUrl = imageResult.fallbackUrl;
-      statusText = "Generated art image (fallback)";
-    }
-
-    // Save history log automatically
-    await saveRequestHistory(
-      req.user.uid,
-      "Image Generator",
-      styledPrompt,
-      statusText,
-      imageUrl,
-      null
-    );
-
-    const providerKey = imageResult.provider || res.getHeader("X-AI-Provider") || "gemini";
-    const finalResult = {
-      ...imageResult,
-      status: statusText,
-      provider: providerKey
-    };
-    await aiCache.set("Image Generator", cacheInputs, finalResult);
-
-    return sendWithProvider(res, finalResult);
-  } catch (error) {
-    console.error("Image Generator Error:", error);
-    await refundCreditIfNeeded(req);
-    res.status(500).json({ error: getFriendlyErrorMessage(error) });
-  }
-});
 
 // 5. WhatsApp Reply Generator
 router.post("/whatsapp", async (req, res) => {

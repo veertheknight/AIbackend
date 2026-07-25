@@ -112,9 +112,6 @@ export const GroqProvider = {
     return chatCompletion.choices[0].message.content;
   },
 
-  async generateImage({ prompt, style }) {
-    throw new Error("Groq does not support native image generation");
-  }
 };
 
 export default GroqProvider;

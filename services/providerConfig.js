@@ -1,8 +1,6 @@
 export const providerConfig = {
   "Homework Solver": ["gemini", "groq", "openrouter", "openai"],
 
-  "Image Generator": ["gemini", "openai", "openrouter"],
-
   "Image Analyzer": ["gemini", "openai", "groq", "openrouter"],
 
   "PDF Summary": ["openrouter", "gemini", "groq", "openai"],

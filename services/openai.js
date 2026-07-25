@@ -94,9 +94,6 @@ export const OpenAIProvider = {
     return response.choices[0].message.content;
   },
 
-  async generateImage({ prompt, style }) {
-    throw new Error("OpenAI provider does not support native image generation in this context.");
-  }
 };
 
 export default OpenAIProvider;

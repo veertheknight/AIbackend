@@ -102,9 +102,6 @@ export const OpenRouterProvider = {
     return response.choices[0].message.content;
   },
 
-  async generateImage({ prompt, style }) {
-    throw new Error("OpenRouter does not support native image generation");
-  }
 };
 
 export default OpenRouterProvider;
