@@ -1,46 +1,54 @@
 export const providerConfig = {
-  "Homework Solver": ["gemini", "groq", "openrouter", "openai"],
+  "Homework Solver": ["gemini", "openai", "openrouter", "groq"],
+  "Homework": ["gemini", "openai", "openrouter", "groq"],
+
+  "PDF Summary": ["gemini", "openai", "openrouter", "groq"],
+  "PDF": ["gemini", "openai", "openrouter", "groq"],
+
+  "Translator": ["gemini", "openai", "groq", "openrouter"],
+
+  "WhatsApp Reply": ["gemini", "openai", "groq", "openrouter"],
+  "WhatsApp": ["gemini", "openai", "groq", "openrouter"],
+
+  "Email Writer": ["gemini", "openai", "groq", "openrouter"],
+  "Email": ["gemini", "openai", "groq", "openrouter"],
+
+  "Resume Builder": ["gemini", "openai", "groq", "openrouter"],
+  "Resume": ["gemini", "openai", "groq", "openrouter"],
+
+  "Scam Detector": ["gemini", "openai", "groq", "openrouter"],
+  "Scam": ["gemini", "openai", "groq", "openrouter"],
+
+  "Fake News Detector": ["gemini", "openai", "groq", "openrouter"],
+  "Fake News": ["gemini", "openai", "groq", "openrouter"],
 
   "Image Analyzer": ["gemini", "openai", "groq", "openrouter"],
 
-  "PDF Summary": ["openrouter", "gemini", "groq", "openai"],
+  "Voice Assistant": ["gemini", "openai", "groq", "openrouter"],
+  "Voice Chat": ["gemini", "openai", "groq", "openrouter"],
 
-  "Translator": ["groq", "openai", "gemini", "openrouter"],
+  "Code Generator": ["gemini", "openai", "groq", "openrouter"],
+  "Code Assistant": ["gemini", "openai", "groq", "openrouter"],
+  "Code": ["gemini", "openai", "groq", "openrouter"],
 
-  "WhatsApp Reply": ["groq", "openai", "gemini", "openrouter"],
-
-  "Email Writer": ["groq", "openai", "gemini", "openrouter"],
-
-  "Resume Builder": ["openai", "groq", "gemini", "openrouter"],
-  "Resume": ["openai", "groq", "gemini", "openrouter"],
-
-  "Code Generator": ["openai", "groq", "gemini", "openrouter"],
-  "Code Assistant": ["openai", "groq", "gemini", "openrouter"],
-  "Code": ["openai", "groq", "gemini", "openrouter"],
-
-  "Voice Assistant": ["openai", "groq", "gemini", "openrouter"],
-  "Voice Chat": ["openai", "groq", "gemini", "openrouter"],
-
-  "Scam Detector": ["groq", "gemini", "openai", "openrouter"],
-
-  "Fake News Detector": ["groq", "gemini", "openai", "openrouter"]
+  "default": ["gemini", "openai", "openrouter", "groq"]
 };
 
 export const providerTimeouts = {
-  gemini: 12000,    // 12 seconds
-  groq: 10000,      // 10 seconds
-  openai: 15000,    // 15 seconds
-  openrouter: 12000 // 12 seconds
+  gemini: 25000,    // 25 seconds
+  openai: 25000,    // 25 seconds
+  openrouter: 25000,// 25 seconds
+  groq: 25000       // 25 seconds
 };
 
 export function getToolProviderPriority(toolName) {
-  if (!toolName) return ["gemini", "groq", "openrouter", "openai"];
-  return providerConfig[toolName] || providerConfig["Homework Solver"];
+  if (!toolName) return providerConfig["default"];
+  return providerConfig[toolName] || providerConfig["default"];
 }
 
 export function getProviderTimeout(providerName) {
   const key = String(providerName).toLowerCase();
-  return providerTimeouts[key] || 15000;
+  return providerTimeouts[key] || 25000;
 }
 
 export default providerConfig;

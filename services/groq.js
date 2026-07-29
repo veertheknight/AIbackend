@@ -4,21 +4,19 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-let groq = null;
-if (process.env.GROQ_API_KEY) {
-  groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-  });
+function getGroqClient() {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY is not configured in backend environment.");
+  }
+  return new Groq({ apiKey });
 }
 
 export const GroqProvider = {
   name: "Groq",
 
   async generate({ prompt, systemInstruction, images, audio, responseMimeType, temperature, history, signal }) {
-    if (!groq) {
-      throw new Error("Groq API key not configured");
-    }
-
+    const client = getGroqClient();
     let model = "llama-3.3-70b-versatile";
     let messages = [];
 
@@ -26,65 +24,52 @@ export const GroqProvider = {
       messages.push({ role: "system", content: systemInstruction });
     }
 
-    // Map history to OpenAI/Groq standard role/content format
     if (history && history.length > 0) {
       for (const h of history) {
         const role = h.role === "model" ? "assistant" : "user";
-        // Extract text parts
-        const content = h.parts.map(p => p.text).join("\n");
+        const content = (h.parts || []).map(p => p.text || "").join("\n");
         messages.push({ role, content });
       }
     }
 
-    // Handle audio input: transcribe audio first, then feed text into prompt
-    let userPrompt = prompt;
-    if (audio) {
-      console.log("[Groq Provider] Transcribing audio via whisper-large-v3...");
+    let userPrompt = prompt || "";
+    if (audio && audio.data) {
       const buffer = Buffer.from(audio.data, "base64");
       const tempDir = "./uploads";
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
-      const tempFilePath = `${tempDir}/groq_temp_${Date.now()}.m4a`;
+      const tempFilePath = `${tempDir}/groq_temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.m4a`;
       fs.writeFileSync(tempFilePath, buffer);
 
       try {
-        const transcriptionResult = await groq.audio.transcriptions.create({
+        const transcriptionResult = await client.audio.transcriptions.create({
           file: fs.createReadStream(tempFilePath),
           model: "whisper-large-v3",
         }, { signal });
 
         const transcript = transcriptionResult.text || "";
-        console.log(`[Groq Provider] Transcription result: "${transcript}"`);
-
-        // If it expects JSON (like voice assistant output transcription + answer), format request
-        if (responseMimeType === "application/json") {
-          userPrompt = `${prompt}
-          User voice input: "${transcript}"`;
-        } else {
-          userPrompt = `The user spoke: "${transcript}". ${prompt}`;
-        }
+        userPrompt = `User spoke: "${transcript}". ${prompt}`;
       } finally {
         try {
           fs.unlinkSync(tempFilePath);
-        } catch (e) {}
+        } catch {}
       }
     }
 
-    // Handle multimodal images
     if (images && images.length > 0) {
       model = "llama-3.2-90b-vision-preview";
       const contents = [{ type: "text", text: userPrompt }];
-
       for (const img of images) {
-        contents.push({
-          type: "image_url",
-          image_url: {
-            url: `data:${img.mimeType || "image/jpeg"};base64,${img.data}`,
-          },
-        });
+        if (img.data) {
+          contents.push({
+            type: "image_url",
+            image_url: {
+              url: `data:${img.mimeType || "image/jpeg"};base64,${img.data}`,
+            },
+          });
+        }
       }
-
       messages.push({ role: "user", content: contents });
     } else {
       messages.push({ role: "user", content: userPrompt });
@@ -103,15 +88,14 @@ export const GroqProvider = {
       options.response_format = { type: "json_object" };
     }
 
-    const chatCompletion = await groq.chat.completions.create(options, { signal });
+    const response = await client.chat.completions.create(options, { signal });
 
-    if (!chatCompletion.choices || !chatCompletion.choices[0] || !chatCompletion.choices[0].message) {
-      throw new Error("Empty response from Groq");
+    if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
+      throw new Error("Empty response returned from Groq API");
     }
 
-    return chatCompletion.choices[0].message.content;
+    return response.choices[0].message.content || "";
   },
-
 };
 
 export default GroqProvider;

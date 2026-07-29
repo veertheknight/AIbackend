@@ -62,20 +62,11 @@ async function refundCreditIfNeeded(req) {
   }
 }
 
-// Helper to mask internal crash messages with professional warnings
+// Helper to format clean error messages
 function getFriendlyErrorMessage(error) {
   const msg = error.message || "";
-  if (
-    msg.includes("No speech detected") ||
-    msg.includes("Please watch the complete") ||
-    msg.includes("Validation") ||
-    msg.includes("Missing") ||
-    msg.includes("No Credits") ||
-    msg.includes("Invalid")
-  ) {
-    return msg;
-  }
-  return "All AI services are temporarily unavailable. Please try again shortly.";
+  if (!msg) return "AI request failed. Please try again.";
+  return msg;
 }
 
 // Helper to save requests directly to Firestore History

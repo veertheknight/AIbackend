@@ -1,41 +1,26 @@
 import GeminiProvider from "./gemini.js";
-import GroqProvider from "./groq.js";
-import OpenRouterProvider from "./openrouter.js";
 import OpenAIProvider from "./openai.js";
+import OpenRouterProvider from "./openrouter.js";
+import GroqProvider from "./groq.js";
 import { getToolProviderPriority, getProviderTimeout } from "./providerConfig.js";
-import {
-  isProviderHealthy,
-  startRequest,
-  finishSuccess,
-  finishFailure
-} from "./providerHealth.js";
+import { startRequest, finishSuccess, finishFailure } from "./providerHealth.js";
 
-// Mapping of provider keys to their implementations
 const providerMap = {
   "gemini": GeminiProvider,
-  "groq": GroqProvider,
-  "openrouter": OpenRouterProvider,
   "openai": OpenAIProvider,
-  "Gemini": GeminiProvider,
-  "Groq": GroqProvider,
-  "OpenRouter": OpenRouterProvider,
-  "OpenAI": OpenAIProvider
+  "openrouter": OpenRouterProvider,
+  "groq": GroqProvider,
 };
 
 /**
- * 1. Clean and extract valid JSON substring from provider output.
- * Removes ```json fences, ``` fences, trims whitespace, and extracts starting at '{' or '['.
+  1. Clean and extract valid JSON substring from provider output.
  */
 export function cleanAndExtractJson(text) {
   if (!text || typeof text !== "string") return "";
-  
   let str = text.trim();
-
-  // Remove markdown code fences ```json ... ``` or ``` ... ```
   str = str.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   str = str.replace(/```json/gi, "").replace(/```/g, "").trim();
 
-  // Find first opening brace or bracket
   const firstBrace = str.indexOf("{");
   const firstBracket = str.indexOf("[");
 
@@ -57,37 +42,31 @@ export function cleanAndExtractJson(text) {
       str = str.substring(start);
     }
   }
-
   return str.trim();
 }
 
 /**
- * 2. Automatic JSON Repair.
- * Tries direct parse, trailing comma removal, quote fixes, and bracket completion.
+  2. Automatic JSON Repair.
  */
 export function attemptJsonRepair(text) {
   const str = cleanAndExtractJson(text);
 
-  // Attempt 1: Direct JSON.parse
   try {
     return JSON.parse(str);
-  } catch (e1) {}
+  } catch {}
 
-  // Attempt 2: Strip trailing commas inside arrays and objects
   try {
     const fixedCommas = str.replace(/,\s*([\]}])/g, "$1");
     return JSON.parse(fixedCommas);
-  } catch (e2) {}
+  } catch {}
 
-  // Attempt 3: Convert single quotes to double quotes
   try {
     const fixedQuotes = str
       .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')
       .replace(/,\s*([\]}])/g, "$1");
     return JSON.parse(fixedQuotes);
-  } catch (e3) {}
+  } catch {}
 
-  // Attempt 4: Auto-close unclosed braces or brackets
   try {
     let openBraces = (str.match(/\{/g) || []).length - (str.match(/\}/g) || []).length;
     let openBrackets = (str.match(/\[/g) || []).length - (str.match(/\]/g) || []).length;
@@ -103,17 +82,16 @@ export function attemptJsonRepair(text) {
     }
     patched = patched.replace(/,\s*([\]}])/g, "$1");
     return JSON.parse(patched);
-  } catch (e4) {}
+  } catch {}
 
   throw new Error("Unable to parse or repair JSON output");
 }
 
 /**
- * 3. Shared JSON Schema Validator and Automatic Structure Repair.
+  3. Shared JSON Schema Validator and Automatic Structure Repair.
  */
 export function validateAndRepairSchema(jsonObj, schemaType) {
   if (!schemaType) return jsonObj;
-
   let json = jsonObj;
 
   if (schemaType === "whatsapp") {
@@ -127,37 +105,19 @@ export function validateAndRepairSchema(jsonObj, schemaType) {
         }
       }
     }
-
     if (!json || !Array.isArray(json.options) || json.options.length === 0) {
       throw new Error("Validation failed: 'options' must be a non-empty array");
     }
-
     json.options = json.options.map((item) => {
       if (typeof item === "string") {
-        return {
-          tone: "friendly",
-          reply: item
-        };
+        return { tone: "friendly", reply: item };
       } else if (item && typeof item === "object") {
         const replyText = item.reply || item.text || item.message || item.option || item.content || JSON.stringify(item);
         const toneText = item.tone || item.style || "friendly";
-        return {
-          tone: String(toneText),
-          reply: String(replyText)
-        };
+        return { tone: String(toneText), reply: String(replyText) };
       }
-      return {
-        tone: "friendly",
-        reply: String(item)
-      };
+      return { tone: "friendly", reply: String(item) };
     });
-
-    for (const opt of json.options) {
-      if (typeof opt.tone !== "string" || typeof opt.reply !== "string") {
-        throw new Error("Validation failed: Every option must contain tone and reply strings");
-      }
-    }
-
     return json;
   }
 
@@ -199,10 +159,51 @@ export function validateAndRepairSchema(jsonObj, schemaType) {
   return json;
 }
 
+// Request Queueing for Concurrency Control
+const maxConcurrentRequests = 6;
+let activeRequestCount = 0;
+const requestQueue = [];
+
+function processNextInQueue() {
+  if (activeRequestCount < maxConcurrentRequests && requestQueue.length > 0) {
+    const nextTask = requestQueue.shift();
+    if (nextTask) nextTask();
+  }
+}
+
+function queueRequest(task) {
+  return new Promise((resolve, reject) => {
+    const runner = async () => {
+      activeRequestCount++;
+      try {
+        const result = await task();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      } finally {
+        activeRequestCount--;
+        processNextInQueue();
+      }
+    };
+
+    if (activeRequestCount < maxConcurrentRequests) {
+      runner();
+    } else {
+      requestQueue.push(runner);
+    }
+  });
+}
+
 /**
- * Orchestrates AI calls with smart tool-wise provider selection, health monitoring, timeouts, validations and automatic failovers.
+ * Orchestrates AI requests with completely independent sessions per request,
+ * multi-provider fallback cascade, exponential retries, request timeout handling,
+ * and structured logging.
  */
 export async function generate(params) {
+  return queueRequest(() => executeGenerate(params));
+}
+
+async function executeGenerate(params) {
   const {
     prompt,
     systemInstruction,
@@ -217,35 +218,23 @@ export async function generate(params) {
     res
   } = params;
 
-  // 1. Request Validation
   if (!prompt && !audio) {
     throw new Error("Invalid request: Prompt or Audio input must be provided.");
-  }
-  if (images) {
-    for (const img of images) {
-      if (!img.data || !img.mimeType) {
-        throw new Error("Invalid request: Image payload is missing data or mimeType.");
-      }
-    }
-  }
-  if (audio) {
-    if (!audio.data || !audio.mimeType) {
-      throw new Error("Invalid request: Audio payload is missing data or mimeType.");
-    }
   }
 
   const startTime = Date.now();
   const priorityList = getToolProviderPriority(toolName);
   const attemptedProviders = [];
+  let fallbackCount = 0;
   let lastError = null;
 
-  console.log(`[AI Provider Manager] [Incoming Request]`);
-  console.log(`  - Timestamp: ${new Date().toISOString()}`);
-  console.log(`  - Tool: "${toolName}"`);
-  console.log(`  - Selected Provider Order: ${priorityList.join(" -> ")}`);
-  console.log(`  - Cache: Miss`);
+  console.log(`\n==================================================`);
+  console.log(`[AI Provider Router] NEW FRESH REQUEST`);
+  console.log(`  • Tool Name: "${toolName}"`);
+  console.log(`  • Priority Cascade: ${priorityList.join(" ➔ ")}`);
+  console.log(`  • Timestamp: ${new Date().toISOString()}`);
+  console.log(`==================================================`);
 
-  // 2. Iterate through provider priority list
   for (let i = 0; i < priorityList.length; i++) {
     const providerKey = priorityList[i].toLowerCase();
     const providerObj = providerMap[providerKey];
@@ -254,23 +243,13 @@ export async function generate(params) {
       continue;
     }
 
-    // Step 3: Check Provider Health & Cooldown
-    if (!isProviderHealthy(providerKey)) {
-      console.log(`[AI Provider Manager] Provider "${providerKey}" is currently in cooldown (unhealthy). Skipping.`);
-      continue;
-    }
-
-    const timeoutMs = getProviderTimeout(providerKey);
-    const fallbackKey = priorityList[i + 1] ? priorityList[i + 1].toLowerCase() : "None";
-
     attemptedProviders.push(providerKey);
     startRequest(providerKey);
 
-    let maxAttempts = 1;
-    let currentAttempt = 0;
+    const timeoutMs = getProviderTimeout(providerKey);
+    const maxRetries = 2; // Up to 2 attempts per provider
 
-    while (currentAttempt < maxAttempts) {
-      currentAttempt++;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       const pStartTime = Date.now();
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -284,16 +263,16 @@ export async function generate(params) {
           responseMimeType,
           temperature,
           history,
-          signal: controller.signal
+          signal: controller.signal,
         });
 
         clearTimeout(timeoutId);
 
-        if (!rawResponse || rawResponse.trim().length === 0) {
-          throw new Error("Provider returned an empty response.");
+        if (!rawResponse || typeof rawResponse !== "string" || rawResponse.trim().length === 0) {
+          throw new Error(`Empty text response returned from provider "${providerKey}"`);
         }
 
-        // Validate & Repair JSON & Schema
+        // Parse & Repair JSON if requested
         let finalOutput = rawResponse;
         if (responseMimeType === "application/json" || schemaType) {
           const parsedJson = attemptJsonRepair(rawResponse);
@@ -303,60 +282,67 @@ export async function generate(params) {
 
         const pDuration = Date.now() - pStartTime;
         const totalDuration = Date.now() - startTime;
+        const responseLength = finalOutput.length;
 
         finishSuccess(providerKey, pDuration);
 
-        // Expose selected provider via HTTP headers on response object
         if (res && typeof res.setHeader === "function") {
           res.setHeader("X-AI-Provider", providerKey);
           res.setHeader("X-Provider-Used", providerKey);
         }
 
-        console.log(`[AI Provider Manager] [Success]`);
-        console.log(`  - Timestamp: ${new Date().toISOString()}`);
-        console.log(`  - Tool: "${toolName}"`);
-        console.log(`  - Final Provider Used: "${providerKey}"`);
-        console.log(`  - Providers Attempted: [${attemptedProviders.join(", ")}]`);
-        console.log(`  - Latency: ${totalDuration}ms`);
-        console.log(`  - User Type: ${userType}`);
+        // STRUCTURED LOGGING
+        console.log(`\n[AI Provider Router] ✅ REQUEST SUCCESSFUL`);
+        console.log(`  • Tool Name: "${toolName}"`);
+        console.log(`  • Selected Provider: "${providerKey}"`);
+        console.log(`  • Fallback Count: ${fallbackCount}`);
+        console.log(`  • Attempt Number: ${attempt}`);
+        console.log(`  • Latency: ${totalDuration}ms (Provider: ${pDuration}ms)`);
+        console.log(`  • Token/Character Count: ${responseLength} chars`);
+        console.log(`  • Providers Attempted: [${attemptedProviders.join(", ")}]`);
+        console.log(`  • Status: SUCCESS\n`);
 
         return finalOutput;
 
       } catch (err) {
         clearTimeout(timeoutId);
         const pDuration = Date.now() - pStartTime;
-        const isTimeout = controller.signal?.aborted || err.name === "AbortError" || err.message.toLowerCase().includes("timeout");
-        const isQuotaError = err.message.includes("429") || err.message.toLowerCase().includes("quota") || err.message.toLowerCase().includes("rate limit");
-
         finishFailure(providerKey, err.message);
         lastError = err;
 
-        console.warn(`[AI Provider Manager] [Failure] Tool: "${toolName}", Provider: "${providerKey}", Latency: ${pDuration}ms, Timeout: ${isTimeout}, Quota Error: ${isQuotaError}, Reason: "${err.message}"`);
+        console.warn(`[AI Provider Router] ⚠️ Attempt ${attempt}/${maxRetries} failed on provider "${providerKey}" for tool "${toolName}". Duration: ${pDuration}ms. Error: ${err.message}`);
 
-        // Smart Retry logic: Retry ONLY once if it is a temporary network glitch (e.g. ECONNRESET)
-        const isNetworkGlitch = (err.code === "ECONNRESET" || err.code === "ETIMEDOUT" || err.code === "ENOTFOUND") && !isTimeout && !isQuotaError;
-        if (isNetworkGlitch && currentAttempt < 2) {
-          maxAttempts = 2;
-          console.log(`[AI Provider Manager] Temporary network glitch detected on "${providerKey}". Retrying once...`);
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } else {
-          // Immediately switch to next provider on timeouts, 429s, or schema errors
-          if (fallbackKey !== "None") {
-            console.log(`[AI Provider Manager] [Provider Switch] Immediately switching from "${providerKey}" to fallback "${fallbackKey}"`);
-          }
-          break;
+        // If attempt < maxRetries, apply exponential backoff before retrying same provider
+        if (attempt < maxRetries) {
+          const backoffMs = 500 * Math.pow(2, attempt - 1);
+          console.log(`[AI Provider Router] Retrying provider "${providerKey}" in ${backoffMs}ms...`);
+          await new Promise(r => setTimeout(r, backoffMs));
         }
       }
     }
+
+    // Provider failed after all retries -> increment fallback count and cascade to next provider
+    fallbackCount++;
+    const nextProvider = priorityList[i + 1] ? priorityList[i + 1] : "None";
+    console.warn(`[AI Provider Router] 🔄 FALLBACK TRIGGERED: Provider "${providerKey}" exhausted for tool "${toolName}". Switching to fallback "${nextProvider}".`);
   }
 
-  console.error(`[AI Provider Manager] [Failure] All providers exhausted for tool "${toolName}". Final error: "${lastError?.message}"`);
-  throw new Error("All AI services are temporarily unavailable. Please try again shortly.");
+  // All providers failed
+  const totalDuration = Date.now() - startTime;
+  console.error(`\n[AI Provider Router] ❌ ALL PROVIDERS EXHAUSTED`);
+  console.error(`  • Tool Name: "${toolName}"`);
+  console.error(`  • Total Fallback Count: ${fallbackCount}`);
+  console.error(`  • Providers Attempted: [${attemptedProviders.join(", ")}]`);
+  console.error(`  • Total Latency: ${totalDuration}ms`);
+  console.error(`  • Final Error: "${lastError?.message}"`);
+  console.error(`  • Status: FAILURE\n`);
+
+  throw new Error(`All AI services (${attemptedProviders.join(", ")}) failed for ${toolName}. Reason: ${lastError?.message || "Service timeout"}`);
 }
 
 export default {
   generate,
   cleanAndExtractJson,
   attemptJsonRepair,
-  validateAndRepairSchema
+  validateAndRepairSchema,
 };

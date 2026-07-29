@@ -4,69 +4,56 @@ import GroqProvider from "./groq.js";
 
 dotenv.config();
 
-let openai = null;
-if (process.env.OPENAI_API_KEY) {
-  openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured in backend environment.");
+  }
+  return new OpenAI({ apiKey });
 }
 
 export const OpenAIProvider = {
   name: "OpenAI",
 
   async generate({ prompt, systemInstruction, images, audio, responseMimeType, temperature, history, signal }) {
-    if (!openai) {
-      throw new Error("OpenAI API key not configured");
-    }
-
-    const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const client = getOpenAIClient();
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
     let messages = [];
 
     if (systemInstruction) {
       messages.push({ role: "system", content: systemInstruction });
     }
 
-    // Map history to OpenAI format
     if (history && history.length > 0) {
       for (const h of history) {
         const role = h.role === "model" ? "assistant" : "user";
-        const content = h.parts.map(p => p.text).join("\n");
+        const content = (h.parts || []).map(p => p.text || "").join("\n");
         messages.push({ role, content });
       }
     }
 
-    // Handle audio: transcribing using Groq if possible
-    let userPrompt = prompt;
+    let userPrompt = prompt || "";
     if (audio) {
-      console.log("[OpenAI Provider] Attempting audio transcription via Groq...");
       try {
-        const tempParams = {
-          prompt: "",
-          audio,
-          signal
-        };
-        const transcript = await GroqProvider.generate(tempParams);
-        console.log(`[OpenAI Provider] Audio transcribed successfully: "${transcript}"`);
+        const transcript = await GroqProvider.generate({ prompt: "", audio, signal });
         userPrompt = `${prompt}\nUser voice input: "${transcript}"`;
-      } catch (err) {
-        console.error("[OpenAI Provider] Audio transcription fallback failed:", err.message);
-        throw new Error("Audio input is not supported on OpenAI without Groq configuration.");
+      } catch {
+        throw new Error("Audio input is not supported on OpenAI without Groq audio configuration.");
       }
     }
 
-    // Handle multimodal images
     if (images && images.length > 0) {
       const contents = [{ type: "text", text: userPrompt }];
-
       for (const img of images) {
-        contents.push({
-          type: "image_url",
-          image_url: {
-            url: `data:${img.mimeType || "image/jpeg"};base64,${img.data}`,
-          },
-        });
+        if (img.data) {
+          contents.push({
+            type: "image_url",
+            image_url: {
+              url: `data:${img.mimeType || "image/jpeg"};base64,${img.data}`,
+            },
+          });
+        }
       }
-
       messages.push({ role: "user", content: contents });
     } else {
       messages.push({ role: "user", content: userPrompt });
@@ -85,15 +72,14 @@ export const OpenAIProvider = {
       options.response_format = { type: "json_object" };
     }
 
-    const response = await openai.chat.completions.create(options, { signal });
+    const response = await client.chat.completions.create(options, { signal });
 
-    if (!response.choices || !response.choices[0] || !response.choices[0].message) {
-      throw new Error("Empty response from OpenAI");
+    if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
+      throw new Error("Empty response returned from OpenAI API");
     }
 
-    return response.choices[0].message.content;
+    return response.choices[0].message.content || "";
   },
-
 };
 
 export default OpenAIProvider;
