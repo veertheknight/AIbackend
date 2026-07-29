@@ -69,23 +69,9 @@ function getFriendlyErrorMessage(error) {
   return msg;
 }
 
-// Helper to save requests directly to Firestore History
-async function saveRequestHistory(uid, toolName, prompt, response, imageUrl = null, pdfUrl = null) {
-  try {
-    const historyRef = adminDb.collection("history");
-    await historyRef.add({
-      userId: uid,
-      toolName,
-      prompt,
-      response,
-      imageUrl,
-      pdfUrl,
-      timestamp: FieldValue.serverTimestamp()
-    });
-    console.log(`Saved history log for tool: ${toolName}, user: ${uid}`);
-  } catch (e) {
-    console.error("Failed to save history log:", e.message);
-  }
+// History tracking disabled
+async function saveRequestHistory() {
+  return;
 }
 
 // Helper to upload base64 image data directly to Firebase Storage
