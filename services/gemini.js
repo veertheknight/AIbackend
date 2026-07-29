@@ -85,6 +85,10 @@ export const GeminiProvider = {
         }
       } catch (err) {
         lastErr = err;
+        // If rate limited, pause briefly before next model candidate
+        if (err.message && (err.message.includes("429") || err.message.includes("quota"))) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
       }
     }
 

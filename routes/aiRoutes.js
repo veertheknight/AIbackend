@@ -389,7 +389,7 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     }
 
     PDF Text:
-    ${text.substring(0, 20000)}`;
+    ${text.substring(0, 8000)}`;
 
     const responseText = await aiProvider.generate({
       prompt,
