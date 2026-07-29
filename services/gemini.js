@@ -68,8 +68,8 @@ export const GeminiProvider = {
       config.temperature = temperature;
     }
 
-    // Attempt generateContent across supported Gemini models
-    const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+    // Attempt generateContent across supported & unthrottled Gemini models
+    const modelsToTry = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
     let lastErr = null;
 
     for (const modelName of modelsToTry) {
