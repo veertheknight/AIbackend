@@ -389,7 +389,7 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
     }
 
     PDF Text:
-    ${text.substring(0, 8000)}`;
+    ${text.substring(0, 6000)}`;
 
     const responseText = await aiProvider.generate({
       prompt,
@@ -399,8 +399,19 @@ router.post("/pdf", upload.single("pdf"), async (req, res) => {
       res
     });
 
-    const parsed = parseSafeJson(responseText);
-    parsed.provider = res.getHeader("X-AI-Provider") || "openrouter";
+    let parsed;
+    try {
+      parsed = parseSafeJson(responseText);
+    } catch {
+      parsed = {
+        summary: responseText || "PDF document analyzed.",
+        bulletPoints: ["Document summary complete."],
+        chapterSummary: [],
+        importantQuestions: [],
+        keyPoints: []
+      };
+    }
+    parsed.provider = res.getHeader("X-AI-Provider") || "gemini";
 
     // Save history log automatically
     await saveRequestHistory(

@@ -69,7 +69,7 @@ export const GeminiProvider = {
     }
 
     // Attempt generateContent across supported & unthrottled Gemini models
-    const modelsToTry = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
     let lastErr = null;
 
     for (const modelName of modelsToTry) {
@@ -85,9 +85,9 @@ export const GeminiProvider = {
         }
       } catch (err) {
         lastErr = err;
-        // If rate limited, pause briefly before next model candidate
-        if (err.message && (err.message.includes("429") || err.message.includes("quota"))) {
-          await new Promise((r) => setTimeout(r, 400));
+        // If rate limited or quota error, pause 600ms before next model candidate
+        if (err.message && (err.message.includes("429") || err.message.includes("quota") || err.message.includes("RESOURCE_EXHAUSTED"))) {
+          await new Promise((r) => setTimeout(r, 600));
         }
       }
     }
